@@ -35,14 +35,20 @@ export function placeLabelTextField(): ExpressionSpecification {
   ];
 }
 
+import type { ThemeMode } from "@/lib/theme";
+
 /** Ocean/background colors + English territory label overrides on remote basemap styles. */
-export function applyBasemapTuning(map: MaplibreMap): void {
+export function applyBasemapTuning(map: MaplibreMap, theme: ThemeMode = "dark"): void {
+  const colors =
+    theme === "light"
+      ? { background: "#dce6ef", water: "#b8d4e8" }
+      : { background: "#060a12", water: "#0b1322" };
   try {
     for (const layer of map.getStyle().layers ?? []) {
       if (layer.type === "background") {
-        map.setPaintProperty(layer.id, "background-color", "#060a12");
+        map.setPaintProperty(layer.id, "background-color", colors.background);
       } else if (layer.type === "fill" && /water|ocean/i.test(layer.id)) {
-        map.setPaintProperty(layer.id, "fill-color", "#0b1322");
+        map.setPaintProperty(layer.id, "fill-color", colors.water);
       } else if (layer.type === "symbol" && layer.id.startsWith("place_")) {
         map.setLayoutProperty(layer.id, "text-field", placeLabelTextField());
       }

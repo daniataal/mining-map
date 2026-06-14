@@ -8,6 +8,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import { applyBasemapTuning } from "@/lib/basemapLabels";
 import { FEATURE } from "@/lib/entitlements";
 import { fetchAssetGeometries, fetchMCRCorridors, fetchSTSEvents, fetchSTSPredictions, fetchSTSSummary, fetchStorageSites, fetchVesselTrack, type STSSummary } from "@/lib/energyApi";
+import { useTheme } from "@/contexts/ThemeContext";
 import {
   API_BASE,
   defaultLayerState,
@@ -15,7 +16,7 @@ import {
   layerGroupsForVertical,
   layersForVertical,
   MAP_COLORS,
-  MAP_STYLE_URL,
+  mapStyleForTheme,
   mapSourceKey,
   metalsMapLayersActive,
   type LayerDef,
@@ -138,6 +139,141 @@ function strProp(v: unknown): string | undefined {
   if (v == null) return undefined;
   const s = String(v).trim();
   return s === "" ? undefined : s;
+}
+
+function quickPopupEntityLabel(selection: MapSelection): string {
+  if (selection._entityType === "vessel") return "vessel";
+  if (selection._entityType === "sts") return "STS signal";
+  const assetType = strProp(selection.asset_type);
+  if (assetType) return assetType.replace(/_/g, " ");
+  if (selection._layer === "pipelines") return "pipeline";
+  if (selection._layer === "storage-sites") return "storage site";
+  return selection._entityType ?? "asset";
+}
+
+function dossierHref(selection: MapSelection): string | null {
+  if (selection._entityType === "vessel" && selection.mmsi) {
+    const qs = selection.name ? `?name=${encodeURIComponent(selection.name)}` : "";
+    return `/intel/vessel/${encodeURIComponent(selection.mmsi)}${qs}`;
+  }
+  if ((selection._entityType === "asset" || selection._entityType === "company") && selection.id) {
+    const qs = new URLSearchParams();
+    if (selection.name) qs.set("name", selection.name);
+    if (selection.legacy_row_id) qs.set("legacy", selection.legacy_row_id);
+    const suffix = qs.size > 0 ? `?${qs.toString()}` : "";
+    return `/intel/${encodeURIComponent(selection._entityType)}/${encodeURIComponent(selection.id)}${suffix}`;
+  }
+  return null;
+}
+
+function selectionFromMapHit(
+  props: MapSelection,
+  layerId: string,
+  lngLat: { lat: number; lng: number },
+): MapSelection {
+  const rawProps = props as Record<string, unknown>;
+  return {
+    ...props,
+    id: layerId === "gem-asset-geometries"
+      ? rawProps.asset_id != null
+        ? String(rawProps.asset_id)
+        : undefined
+      : props.id != null
+        ? String(props.id)
+        : undefined,
+    legacy_row_id: (props as { legacy_row_id?: string }).legacy_row_id != null
+      ? String((props as { legacy_row_id?: string }).legacy_row_id)
+      : undefined,
+    osm_id: (props as { osm_id?: string }).osm_id != null
+      ? String((props as { osm_id?: string }).osm_id)
+      : undefined,
+    pipeline_source: (props as { pipeline_source?: string }).pipeline_source != null
+      ? String((props as { pipeline_source?: string }).pipeline_source)
+      : undefined,
+    pipeline_status: (props as { pipeline_status?: string }).pipeline_status != null
+      ? String((props as { pipeline_status?: string }).pipeline_status)
+      : undefined,
+    mmsi: props.mmsi != null ? String(props.mmsi) : undefined,
+    name: layerId === "gem-asset-geometries" && rawProps.asset_name != null
+      ? String(rawProps.asset_name)
+      : props.name != null
+        ? String(props.name)
+        : undefined,
+    asset_type: props.asset_type != null ? String(props.asset_type) : undefined,
+    operator: props.operator != null ? String(props.operator) : undefined,
+    substance: props.substance != null ? String(props.substance) : undefined,
+    pipeline_substance: props.pipeline_substance != null ? String(props.pipeline_substance) : undefined,
+    confidence_score: props.confidence_score != null ? String(props.confidence_score) : undefined,
+    click_lat: lngLat.lat,
+    click_lng: lngLat.lng,
+    _layer: layerId,
+    _entityType: entityTypeForLayer(layerId),
+  };
+}
+
+function popupRow(label: string, value?: string): HTMLElement | null {
+  if (!value) return null;
+  const row = document.createElement("span");
+  const k = document.createElement("small");
+  const v = document.createElement("strong");
+  k.textContent = label;
+  v.textContent = value;
+  row.append(k, v);
+  return row;
+}
+
+function buildQuickPopupNode(selection: MapSelection, onInspect: () => void): HTMLElement {
+  const root = document.createElement("div");
+  root.className = "map-click-card";
+
+  const top = document.createElement("div");
+  top.className = "map-click-card-top";
+  const type = document.createElement("span");
+  type.className = "badge compact partial";
+  type.textContent = quickPopupEntityLabel(selection);
+  const score = document.createElement("span");
+  score.className = "map-click-score";
+  score.textContent = strProp(selection.confidence_score) ? `score ${strProp(selection.confidence_score)}` : "source";
+  top.append(type, score);
+
+  const title = document.createElement("strong");
+  title.className = "map-click-title";
+  title.textContent = selection.name || selection.event_title || selection.mmsi || "Selected feature";
+
+  const rows = document.createElement("div");
+  rows.className = "map-click-rows";
+  [
+    popupRow("operator", strProp(selection.operator)),
+    popupRow("product", strProp(selection.substance) || strProp(selection.pipeline_substance) || strProp(selection.product_hint)),
+    popupRow("status", strProp(selection.pipeline_status) || strProp(selection.review_tier)),
+    popupRow("id", strProp(selection.id) || strProp(selection.mmsi) || strProp(selection.osm_id)),
+  ].forEach((row) => {
+    if (row) rows.appendChild(row);
+  });
+
+  const actions = document.createElement("div");
+  actions.className = "map-click-actions";
+  const inspect = document.createElement("button");
+  inspect.type = "button";
+  inspect.textContent = "Inspect rail";
+  inspect.addEventListener("click", onInspect);
+  actions.appendChild(inspect);
+
+  const href = dossierHref(selection);
+  if (href) {
+    const open = document.createElement("button");
+    open.type = "button";
+    open.textContent = "Open dossier";
+    open.addEventListener("click", () => {
+      window.location.href = href;
+    });
+    actions.appendChild(open);
+  }
+
+  root.append(top, title);
+  if (rows.childElementCount > 0) root.appendChild(rows);
+  root.appendChild(actions);
+  return root;
 }
 
 function stsSelectionFromProps(props: Record<string, unknown>, layerId: string): MapSelection {
@@ -875,9 +1011,11 @@ export default function IntelligenceMap({
   onRuntimeStatus,
   entitlements,
 }: Props) {
+  const { theme } = useTheme();
   const container = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const hoverPopupRef = useRef<maplibregl.Popup | null>(null);
+  const clickPopupRef = useRef<maplibregl.Popup | null>(null);
   const selectedFeatureRef = useRef<FeatureTarget | null>(null);
   const [layers, setLayers] = useState<Record<string, boolean>>(() => defaultLayerState(vertical));
   const layersRef = useRef(layers);
@@ -948,7 +1086,7 @@ export default function IntelligenceMap({
         }
         return { url };
       },
-      style: MAP_STYLE_URL,
+      style: mapStyleForTheme(theme),
       center: [55, 25],
       zoom: 4,
       attributionControl: false,
@@ -966,7 +1104,7 @@ export default function IntelligenceMap({
     const setupMap = () => {
       if (cancelled) return;
       ensureVesselImages(map);
-      applyBasemapTuning(map);
+      applyBasemapTuning(map, theme);
 
       const sourcesAdded = new Set<string>();
       layersForVertical(vertical)
@@ -1070,6 +1208,8 @@ export default function IntelligenceMap({
               (vertical === "energy" && isVesselLayerId(f.layer.id)),
           );
         if (!hit) {
+          clickPopupRef.current?.remove();
+          clickPopupRef.current = null;
           onSelect(null);
           return;
         }
@@ -1083,12 +1223,29 @@ export default function IntelligenceMap({
               ? "live-vessels"
               : "vessels"
             : hit.layer.id;
+        const showQuickPopup = (next: MapSelection) => {
+          clickPopupRef.current?.remove();
+          hoverPopupRef.current?.remove();
+          const popup = new maplibregl.Popup({
+            closeButton: true,
+            closeOnClick: false,
+            className: "map-click-popup",
+            offset: 16,
+          });
+          const node = buildQuickPopupNode(next, () => {
+            popup.remove();
+            if (clickPopupRef.current === popup) clickPopupRef.current = null;
+            onSelect(next);
+          });
+          popup.setLngLat(e.lngLat).setDOMContent(node).addTo(map);
+          clickPopupRef.current = popup;
+        };
         if (layerId === "sts-events" || layerId === "sts-predictions") {
-          onSelect(stsSelectionFromProps(props as Record<string, unknown>, layerId));
+          showQuickPopup(stsSelectionFromProps(props as Record<string, unknown>, layerId));
           return;
         }
         if (layerId === "storage-sites") {
-          onSelect({
+          showQuickPopup({
             ...props,
             id: undefined, // estimate row, not a registry entity — no dossier fetch
             name: props.name != null ? String(props.name) : "Storage site",
@@ -1097,44 +1254,7 @@ export default function IntelligenceMap({
           });
           return;
         }
-        const rawProps = props as Record<string, unknown>;
-        onSelect({
-          ...props,
-          id: layerId === "gem-asset-geometries"
-            ? rawProps.asset_id != null
-              ? String(rawProps.asset_id)
-              : undefined
-            : props.id != null
-              ? String(props.id)
-              : undefined,
-          legacy_row_id: (props as { legacy_row_id?: string }).legacy_row_id != null
-            ? String((props as { legacy_row_id?: string }).legacy_row_id)
-            : undefined,
-          osm_id: (props as { osm_id?: string }).osm_id != null
-            ? String((props as { osm_id?: string }).osm_id)
-            : undefined,
-          pipeline_source: (props as { pipeline_source?: string }).pipeline_source != null
-            ? String((props as { pipeline_source?: string }).pipeline_source)
-            : undefined,
-          pipeline_status: (props as { pipeline_status?: string }).pipeline_status != null
-            ? String((props as { pipeline_status?: string }).pipeline_status)
-            : undefined,
-          mmsi: props.mmsi != null ? String(props.mmsi) : undefined,
-          name: layerId === "gem-asset-geometries" && rawProps.asset_name != null
-            ? String(rawProps.asset_name)
-            : props.name != null
-              ? String(props.name)
-              : undefined,
-          asset_type: props.asset_type != null ? String(props.asset_type) : undefined,
-          operator: props.operator != null ? String(props.operator) : undefined,
-          substance: props.substance != null ? String(props.substance) : undefined,
-          pipeline_substance: props.pipeline_substance != null ? String(props.pipeline_substance) : undefined,
-          confidence_score: props.confidence_score != null ? String(props.confidence_score) : undefined,
-          click_lat: e.lngLat.lat,
-          click_lng: e.lngLat.lng,
-          _layer: layerId,
-          _entityType: entityTypeForLayer(layerId),
-        });
+        showQuickPopup(selectionFromMapHit(props, layerId, e.lngLat));
       });
 
       const hoverPopup = new maplibregl.Popup({
@@ -1625,11 +1745,13 @@ export default function IntelligenceMap({
       vesselMotion = null;
       hoverPopupRef.current?.remove();
       hoverPopupRef.current = null;
+      clickPopupRef.current?.remove();
+      clickPopupRef.current = null;
       ws?.close();
       map.remove();
       mapRef.current = null;
     };
-  }, [vertical, onSelect]);
+  }, [vertical, onSelect, theme]);
 
   useEffect(() => {
     const map = mapRef.current;

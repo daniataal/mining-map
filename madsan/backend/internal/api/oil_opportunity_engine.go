@@ -1624,6 +1624,7 @@ func (s *Server) getCompanyCommercialProfile(w http.ResponseWriter, r *http.Requ
 	if importRows > 0 {
 		roles = appendCommercialRole(roles, "buyer", "importer")
 	}
+	linkedIntel := s.entityLinkedIntel(r, "company", id, name, commodities, country)
 	writeJSON(w, map[string]any{
 		"id":                 id,
 		"type":               "company",
@@ -1633,8 +1634,10 @@ func (s *Server) getCompanyCommercialProfile(w http.ResponseWriter, r *http.Requ
 		"roles":              roles,
 		"contactability":     map[string]string{"website": website, "phone": phone, "email": email},
 		"asset_counts":       map[string]int{"operator": operatorAssets, "owner": ownerAssets, "owned_vessels": ownedVessels, "operated_vessels": operatedVessels, "import_rows": importRows},
+		"assets":             s.companyCommercialAssets(r.Context(), id),
 		"trade_flow_summary": s.companyTradeFlowSummary(r, id),
 		"contacts":           s.companyContacts(r, id),
+		"linked_intel":       linkedIntel,
 		"confidence_score":   confidence,
 		"raw_source_payload": jsonBlock(raw, "{}"),
 		"evidence_label":     "reported",
@@ -1659,55 +1662,895 @@ func (s *Server) getAssetCommercialProfile(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "asset not found", http.StatusNotFound)
 		return
 	}
+	linkedIntel := s.entityLinkedIntel(r, "asset", id, name, commodities, country)
 	writeJSON(w, map[string]any{
-		"id":               id,
-		"type":             "asset",
-		"name":             name,
-		"asset_type":       assetType,
-		"country_code":     country,
-		"commodities":      commodities,
-		"operator":         map[string]string{"company_id": operatorID, "name": operatorName},
-		"owner":            map[string]string{"company_id": ownerID, "name": ownerName},
-		"roles":            []string{"real_asset"},
-		"confidence_score": confidence,
-		"raw_source":       jsonBlock(raw, "{}"),
-		"evidence_label":   "reported",
+		"id":                 id,
+		"type":               "asset",
+		"name":               name,
+		"asset_type":         assetType,
+		"country_code":       country,
+		"commodities":        commodities,
+		"operator":           map[string]string{"company_id": operatorID, "name": operatorName},
+		"owner":              map[string]string{"company_id": ownerID, "name": ownerName},
+		"roles":              []string{"real_asset"},
+		"ownership_chain":    s.assetOwnershipIntel(r.Context(), id),
+		"investor_exposures": s.entityInvestorExposures(r.Context(), "asset", id, 12),
+		"linked_intel":       linkedIntel,
+		"confidence_score":   confidence,
+		"raw_source":         jsonBlock(raw, "{}"),
+		"evidence_label":     "reported",
 	})
 }
 
 func (s *Server) getVesselCommercialProfile(w http.ResponseWriter, r *http.Request, id string) {
-	var name, imo, mmsi, vesselType, ownerName, operatorName, ownerID, operatorID, vesselClass string
+	var name, imo, mmsi, vesselType, ownerName, operatorName, ownerID, operatorID, vesselClass, ownerProfileRaw string
 	var dwt, confidence float64
 	err := s.pool.QueryRow(r.Context(), `
 		SELECT COALESCE(v.name, ''), COALESCE(v.imo, ve.imo, ''), COALESCE(v.mmsi, ve.mmsi, ''),
 		       COALESCE(v.vessel_type, ''), COALESCE(ve.owner_name, ''), COALESCE(ve.operator_name, ''),
 		       COALESCE(ve.owner_company_id::text, ''), COALESCE(ve.operator_company_id::text, ''),
 		       COALESCE(ve.vessel_class, ''), COALESCE(ve.deadweight_tons, 0),
+		       COALESCE(ve.owner_profile, '{}'::jsonb)::text,
 		       GREATEST(COALESCE(v.confidence_score, 0), COALESCE(ve.confidence_score, 0))
 		FROM vessels v
 		LEFT JOIN vessel_enrichment ve ON ve.vessel_id = v.id OR (v.mmsi IS NOT NULL AND ve.mmsi = v.mmsi)
 		WHERE v.id::text = $1 OR v.imo = $1 OR v.mmsi = $1
 		LIMIT 1
-	`, id).Scan(&name, &imo, &mmsi, &vesselType, &ownerName, &operatorName, &ownerID, &operatorID, &vesselClass, &dwt, &confidence)
+	`, id).Scan(&name, &imo, &mmsi, &vesselType, &ownerName, &operatorName, &ownerID, &operatorID, &vesselClass, &dwt, &ownerProfileRaw, &confidence)
 	if err != nil {
 		http.Error(w, "vessel not found", http.StatusNotFound)
 		return
 	}
+	ownerProfile := parseJSONObject(ownerProfileRaw)
+	if ownerID := profileString(ownerProfile, "shipvault_company_id"); ownerID != "" {
+		if extra := loadVesselShipvaultOwner(r.Context(), s.pool, ownerID); extra != nil {
+			if ownerProfile == nil {
+				ownerProfile = map[string]any{}
+			}
+			for k, v := range extra {
+				if _, exists := ownerProfile[k]; !exists {
+					ownerProfile[k] = v
+				}
+			}
+		}
+	}
+	nameHistory := loadVesselNameHistory(r.Context(), s.pool, mmsi)
+	vesselSummary := map[string]any{
+		"mmsi":          mmsi,
+		"imo":           imo,
+		"owner_name":    ownerName,
+		"operator_name": operatorName,
+		"name_history":  nameHistory,
+	}
+	if len(ownerProfile) > 0 {
+		vesselSummary["owner_profile"] = ownerProfile
+	}
+	ownershipIntel := buildVesselOwnershipIntel(
+		vesselSummary,
+		ownerProfile,
+		loadVesselFleetMatch(r.Context(), s.pool, profileString(ownerProfile, "shipvault_company_id"), mmsi, imo, nameHistory),
+	)
+	contacts := loadVesselCommercialContacts(r.Context(), s.pool, ownerID, operatorID, ownerName, operatorName, ownerProfile)
+	linkedIntel := s.entityLinkedIntel(r, "vessel", id, name, []string{vesselClass, vesselType}, "")
 	writeJSON(w, map[string]any{
+		"id":                  id,
+		"type":                "vessel",
+		"name":                name,
+		"imo":                 imo,
+		"mmsi":                mmsi,
+		"vessel_type":         vesselType,
+		"vessel_class":        vesselClass,
+		"deadweight_tons":     dwt,
+		"owner":               map[string]string{"company_id": ownerID, "name": ownerName},
+		"operator":            map[string]string{"company_id": operatorID, "name": operatorName},
+		"roles":               []string{"shipowner_route_evidence"},
+		"commercial_contacts": contacts,
+		"name_history":        nameHistory,
+		"owner_profile":       ownerProfile,
+		"ownership_intel":     ownershipIntel,
+		"linked_intel":        linkedIntel,
+		"confidence_score":    confidence,
+		"evidence_label":      "reported",
+	})
+}
+
+func (s *Server) entityLinkedIntel(r *http.Request, entityType, id, name string, commodities []string, country string) map[string]any {
+	commodity := firstCommodityHint(commodities)
+	investorPaths := []json.RawMessage{}
+	if entityType != "vessel" {
+		if rows, err := s.listIntelInvestorPathSnapshots(r, "", "", "", "", id, "", 0, 8); err == nil {
+			investorPaths = rows
+		}
+	}
+	benchmarks := s.latestBenchmarks(r, commodity)
+	if len(benchmarks) == 0 {
+		benchmarks = s.latestLegacySpotPrices(r, commodity)
+	}
+	out := map[string]any{
+		"entity_type":     entityType,
+		"entity_id":       id,
+		"entity_name":     name,
+		"evidence_label":  "mixed",
+		"investor_paths":  investorPaths,
+		"opportunities":   s.profileOpportunities(r.Context(), entityType, id, name, 10),
+		"cargo_movements": s.profileCargoMovements(r.Context(), entityType, id, name, 10),
+		"importers":       s.profileImporters(r.Context(), entityType, id, name, country, 8),
+		"sts_predictions": s.profileSTSPredictions(r.Context(), entityType, id, name, 8),
+		"market_pressure": s.profileMarketPressure(r.Context(), country, commodity, 6),
+		"benchmarks":      benchmarks,
+		"limitations": []string{
+			"Observed identities and inferred opportunities are kept separate.",
+			"Cargo quantity and buyer links remain estimates unless source evidence explicitly confirms them.",
+		},
+	}
+	if entityType == "company" {
+		out["assets"] = s.companyCommercialAssets(r.Context(), id)
+		out["investor_exposures"] = s.entityInvestorExposures(r.Context(), "company", id, 12)
+	}
+	if entityType == "asset" {
+		out["ownership_chain"] = s.assetOwnershipIntel(r.Context(), id)
+		out["investor_exposures"] = s.entityInvestorExposures(r.Context(), "asset", id, 12)
+	}
+	return out
+}
+
+func firstCommodityHint(values []string) string {
+	for _, value := range values {
+		clean := strings.TrimSpace(value)
+		if clean == "" {
+			continue
+		}
+		upper := strings.ToUpper(clean)
+		switch {
+		case strings.Contains(upper, "LNG"):
+			return "LNG"
+		case strings.Contains(upper, "GAS"):
+			return "GAS"
+		case strings.Contains(upper, "LPG"):
+			return "LPG"
+		case strings.Contains(upper, "CRUDE") || strings.Contains(upper, "OIL") || strings.Contains(upper, "PETROLEUM"):
+			return "OIL"
+		default:
+			return clean
+		}
+	}
+	return "OIL"
+}
+
+func (s *Server) profileOpportunities(ctx context.Context, entityType, id, name string, limit int) []json.RawMessage {
+	rows, err := s.pool.Query(ctx, `
+		SELECT jsonb_build_object(
+			'id', oc.id::text,
+			'opportunity_type', oc.opportunity_type,
+			'commodity', COALESCE(oc.commodity, ''),
+			'origin_country', COALESCE(oc.origin_country, ''),
+			'destination_country', COALESCE(oc.destination_country, ''),
+			'supplier_company_id', COALESCE(oc.supplier_company_id::text, ''),
+			'buyer_company_id', COALESCE(oc.buyer_company_id::text, ''),
+			'supplier_asset_id', COALESCE(oc.supplier_asset_id::text, ''),
+			'buyer_asset_id', COALESCE(oc.buyer_asset_id::text, ''),
+			'vessel_id', COALESCE(oc.vessel_id::text, ''),
+			'lane_id', COALESCE(oc.lane_id, ''),
+			'score', COALESCE(oc.score, 0)::double precision,
+			'confidence_score', COALESCE(oc.confidence_score, 0)::double precision,
+			'evidence_grade', COALESCE(oc.evidence_grade, 'inferred'),
+			'score_breakdown', jsonb_build_object(
+				'supplier_reality', COALESCE(oc.supplier_reality_score, 0)::double precision,
+				'buyer_reality', COALESCE(oc.buyer_reality_score, 0)::double precision,
+				'market_pressure', COALESCE(oc.market_pressure_score, 0)::double precision,
+				'route_feasibility', COALESCE(oc.route_feasibility_score, 0)::double precision,
+				'price_context', COALESCE(oc.price_context_score, 0)::double precision,
+				'investor_control', COALESCE(oc.investor_control_score, 0)::double precision,
+				'risk_discount', COALESCE(oc.risk_discount_score, 0)::double precision
+			),
+			'route_summary', COALESCE(oc.route_summary, '{}'::jsonb),
+			'cargo_summary', COALESCE(oc.cargo_summary, '{}'::jsonb),
+			'market_pressure_summary', COALESCE(oc.market_pressure_summary, '{}'::jsonb),
+			'price_context', COALESCE(oc.price_context, '{}'::jsonb),
+			'evidence', COALESCE(oc.evidence, '[]'::jsonb),
+			'limitations', COALESCE(oc.limitations, ARRAY[]::text[]),
+			'tier', oc.tier,
+			'generated_at', oc.generated_at::text,
+			'expires_at', COALESCE(oc.expires_at::text, '')
+		)::text
+		FROM opportunity_candidates oc
+		WHERE oc.status = 'active'
+		  AND (
+			($2 IN ('asset', 'company') AND (
+				oc.supplier_asset_id::text = $1
+				OR oc.buyer_asset_id::text = $1
+				OR oc.supplier_company_id::text = $1
+				OR oc.buyer_company_id::text = $1
+			))
+			OR ($2 = 'vessel' AND (
+				oc.vessel_id::text = $1
+				OR EXISTS (
+					SELECT 1 FROM vessels v
+					WHERE v.id = oc.vessel_id
+					  AND (v.id::text = $1 OR v.imo = $1 OR v.mmsi = $1 OR ($3 <> '' AND v.name ILIKE '%' || $3 || '%'))
+				)
+			))
+			OR ($3 <> '' AND oc.evidence::text ILIKE '%' || $3 || '%')
+		  )
+		ORDER BY oc.score DESC, oc.confidence_score DESC, oc.generated_at DESC
+		LIMIT $4
+	`, id, entityType, strings.TrimSpace(name), limit)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	out := []json.RawMessage{}
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			continue
+		}
+		out = append(out, jsonBlock(raw, "{}"))
+	}
+	return out
+}
+
+func (s *Server) profileCargoMovements(ctx context.Context, entityType, id, name string, limit int) []map[string]any {
+	rows, err := s.pool.Query(ctx, `
+		SELECT
+			ce.id::text AS id,
+			COALESCE(v.id::text, '') AS vessel_id,
+			COALESCE(v.name, '') AS vessel_name,
+			COALESCE(v.imo, ve.imo, '') AS imo,
+			COALESCE(v.mmsi, voy.mmsi, ve.mmsi, '') AS mmsi,
+			COALESCE(ve.vessel_class, v.vessel_type, '') AS vessel_class,
+			COALESCE(ve.owner_name, '') AS owner_name,
+			COALESCE(ve.operator_name, '') AS operator_name,
+			COALESCE(ve.owner_company_id::text, '') AS owner_company_id,
+			COALESCE(ve.operator_company_id::text, '') AS operator_company_id,
+			COALESCE(ve.owner_profile, '{}'::jsonb)::text AS owner_profile,
+			COALESCE(voy.id::text, '') AS voyage_id,
+			COALESCE(NULLIF(voy.load_port_name, ''), CASE WHEN pc.event_type ILIKE '%loading%' THEN pc.terminal_name ELSE '' END, '') AS load_port_name,
+			COALESCE(NULLIF(voy.load_country, ''), CASE WHEN pc.event_type ILIKE '%loading%' THEN pc.country_code ELSE '' END, '') AS load_country,
+			COALESCE(NULLIF(voy.discharge_port_name, ''), CASE WHEN pc.event_type ILIKE '%unloading%' THEN pc.terminal_name ELSE '' END, NULLIF(dest.destination, ''), '') AS discharge_port_name,
+			COALESCE(NULLIF(voy.discharge_country, ''), CASE WHEN pc.event_type ILIKE '%unloading%' THEN pc.country_code ELSE '' END, '') AS discharge_country,
+			COALESCE(ce.product_family, voy.commodity_family, '') AS product_family,
+			COALESCE(ce.payload_low, 0) AS payload_low,
+			COALESCE(ce.payload_best, ce.payload_tons, 0) AS payload_best,
+			COALESCE(ce.payload_high, 0) AS payload_high,
+			COALESCE(ce.quantity_unit, 'tons') AS quantity_unit,
+			COALESCE(ce.method, '') AS method,
+			COALESCE(ce.confidence_score, 0) AS confidence_score,
+			ce.observed_at::text AS observed_at,
+			COALESCE(ce.evidence, '[]'::jsonb)::text AS evidence,
+			CASE
+				WHEN voy.id IS NOT NULL THEN 'voyage_match'
+				WHEN pc.id IS NOT NULL THEN 'port_call_' || COALESCE(NULLIF(pc.event_type, ''), 'visit')
+				WHEN NULLIF(dest.destination, '') IS NOT NULL THEN 'ais_destination'
+				ELSE ''
+			END AS route_source,
+			CASE
+				WHEN voy.id IS NOT NULL THEN COALESCE(voy.confidence_score, 0)
+				WHEN pc.id IS NOT NULL THEN COALESCE(pc.confidence_score, 0)
+				WHEN NULLIF(dest.destination, '') IS NOT NULL THEN 35
+				ELSE 0
+			END AS route_confidence,
+			COALESCE(NULLIF(dest.destination, ''), NULLIF(ce.source_payload->>'latest_destination', ''), '') AS latest_destination
+		FROM cargo_estimates ce
+		LEFT JOIN vessels v ON v.id = ce.vessel_id
+		LEFT JOIN LATERAL (
+			SELECT vy.*
+			FROM voyages vy
+			WHERE (ce.voyage_id IS NOT NULL AND vy.id = ce.voyage_id)
+			   OR (
+				ce.voyage_id IS NULL
+				AND (
+					(ce.vessel_id IS NOT NULL AND vy.vessel_id = ce.vessel_id)
+					OR (COALESCE(v.mmsi, '') <> '' AND vy.mmsi = v.mmsi)
+				)
+			   )
+			ORDER BY
+				CASE WHEN ce.voyage_id IS NOT NULL AND vy.id = ce.voyage_id THEN 0 ELSE 1 END,
+				ABS(EXTRACT(EPOCH FROM (COALESCE(vy.ended_at, vy.started_at, ce.observed_at) - ce.observed_at))) ASC,
+				COALESCE(vy.confidence_score, 0) DESC
+			LIMIT 1
+		) voy ON true
+		LEFT JOIN LATERAL (
+			SELECT ve.*
+			FROM vessel_enrichment ve
+			WHERE (v.id IS NOT NULL AND ve.vessel_id = v.id)
+			   OR (COALESCE(v.mmsi, voy.mmsi, '') <> '' AND ve.mmsi = COALESCE(v.mmsi, voy.mmsi))
+			ORDER BY (ve.vessel_id = v.id) DESC, ve.fetched_at DESC
+			LIMIT 1
+		) ve ON true
+		LEFT JOIN LATERAL (
+			SELECT pc.id::text AS id,
+			       COALESCE(a.name, '') AS terminal_name,
+			       COALESCE(a.country_code, '') AS country_code,
+			       COALESCE(pc.event_type, '') AS event_type,
+			       COALESCE(pc.confidence_score, 0) AS confidence_score,
+			       COALESCE(pc.departure_ts, pc.arrival_ts) AS event_ts
+			FROM port_call_visits pc
+			JOIN assets a ON a.id = pc.asset_id
+			WHERE COALESCE(v.mmsi, voy.mmsi, ve.mmsi, '') <> ''
+			  AND pc.mmsi = COALESCE(v.mmsi, voy.mmsi, ve.mmsi)
+			ORDER BY
+				CASE WHEN $2 = 'asset' AND pc.asset_id::text = $1 THEN 0 ELSE 1 END,
+				ABS(EXTRACT(EPOCH FROM (COALESCE(pc.departure_ts, pc.arrival_ts) - ce.observed_at))) ASC,
+				COALESCE(pc.confidence_score, 0) DESC
+			LIMIT 1
+		) pc ON true
+		LEFT JOIN LATERAL (
+			SELECT CASE
+				WHEN UPPER(TRIM(raw.destination)) IN ('FOR ORDERS', 'FOR ORDER', 'TBA', 'UNKNOWN', 'N/A', 'NA') THEN ''
+				ELSE COALESCE(raw.destination, '')
+			END AS destination
+			FROM (
+				SELECT COALESCE(
+					NULLIF(TRIM(v.destination), ''),
+					NULLIF(TRIM(ap.destination), ''),
+					NULLIF(TRIM(ce.source_payload->>'latest_destination'), '')
+				) AS destination
+				FROM (SELECT 1) seed
+				LEFT JOIN LATERAL (
+					SELECT destination
+					FROM ais_positions ap
+					WHERE COALESCE(v.mmsi, voy.mmsi, ve.mmsi, '') <> ''
+					  AND ap.mmsi = COALESCE(v.mmsi, voy.mmsi, ve.mmsi)
+					  AND NULLIF(TRIM(ap.destination), '') IS NOT NULL
+					ORDER BY ap.ts DESC
+					LIMIT 1
+				) ap ON true
+			) raw
+		) dest ON true
+		WHERE (
+			($2 = 'vessel' AND (
+				ce.vessel_id::text = $1
+				OR v.id::text = $1
+				OR v.mmsi = $1
+				OR v.imo = $1
+				OR ve.mmsi = $1
+				OR ve.imo = $1
+				OR ($3 <> '' AND v.name ILIKE '%' || $3 || '%')
+			))
+			OR ($2 = 'company' AND (
+				ve.owner_company_id::text = $1
+				OR ve.operator_company_id::text = $1
+			))
+			OR ($2 = 'asset' AND EXISTS (
+				SELECT 1
+				FROM port_call_visits pc2
+				WHERE pc2.asset_id::text = $1
+				  AND pc2.mmsi = COALESCE(v.mmsi, voy.mmsi, ve.mmsi, '')
+			))
+		)
+		ORDER BY ce.observed_at DESC NULLS LAST, ce.confidence_score DESC
+		LIMIT $4
+	`, id, entityType, strings.TrimSpace(name), limit)
+	out := []map[string]any{}
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			out = append(out, s.scanCargoEstimate(ctx, rows)...)
+		}
+	}
+	if len(out) < limit {
+		out = append(out, s.profileMeridianCargoMovements(ctx, entityType, id, name, limit-len(out))...)
+	}
+	return out
+}
+
+func (s *Server) profileMeridianCargoMovements(ctx context.Context, entityType, id, name string, limit int) []map[string]any {
+	if limit <= 0 {
+		return nil
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT
+			mcr.id::text,
+			COALESCE(mcr.vessel_name, ''),
+			COALESCE(mcr.imo, ''),
+			COALESCE(mcr.mmsi, ''),
+			COALESCE(mcr.commodity_family, ''),
+			COALESCE(mcr.load_port_name, ''),
+			COALESCE(mcr.load_country, ''),
+			COALESCE(mcr.discharge_hint, ''),
+			COALESCE(mcr.discharge_country, ''),
+			COALESCE(mcr.volume_low, 0),
+			COALESCE(mcr.volume_best_estimate, 0),
+			COALESCE(mcr.volume_high, 0),
+			COALESCE(mcr.volume_unit, 'bbl'),
+			COALESCE(mcr.volume_method, mcr.recipe, ''),
+			COALESCE(mcr.confidence, 0),
+			COALESCE(mcr.event_date::text, ''),
+			COALESCE(mcr.evidence_chain, '[]'::jsonb)::text,
+			COALESCE(mcr.shipper_name, ''),
+			COALESCE(mcr.consignee_name, ''),
+			COALESCE(mcr.shipper_company_id::text, ''),
+			COALESCE(mcr.consignee_company_id::text, ''),
+			COALESCE(v.id::text, ''),
+			COALESCE(ve.vessel_class, v.vessel_type, ''),
+			COALESCE(ve.owner_name, ''),
+			COALESCE(ve.operator_name, ''),
+			COALESCE(ve.owner_company_id::text, ''),
+			COALESCE(ve.operator_company_id::text, ''),
+			COALESCE(ve.owner_profile, '{}'::jsonb)::text
+		FROM meridian_cargo_records mcr
+		LEFT JOIN vessels v ON (mcr.mmsi <> '' AND v.mmsi = mcr.mmsi) OR (mcr.imo <> '' AND v.imo = mcr.imo)
+		LEFT JOIN LATERAL (
+			SELECT ve.*
+			FROM vessel_enrichment ve
+			WHERE (v.id IS NOT NULL AND ve.vessel_id = v.id)
+			   OR (mcr.mmsi <> '' AND ve.mmsi = mcr.mmsi)
+			   OR (mcr.imo <> '' AND ve.imo = mcr.imo)
+			ORDER BY (ve.vessel_id = v.id) DESC, ve.fetched_at DESC
+			LIMIT 1
+		) ve ON true
+		WHERE (
+			($2 = 'vessel' AND (
+				mcr.mmsi = $1
+				OR mcr.imo = $1
+				OR v.id::text = $1
+				OR ($3 <> '' AND mcr.vessel_name ILIKE '%' || $3 || '%')
+			))
+			OR ($2 = 'company' AND (
+				mcr.shipper_company_id::text = $1
+				OR mcr.consignee_company_id::text = $1
+				OR ve.owner_company_id::text = $1
+				OR ve.operator_company_id::text = $1
+			))
+			OR ($2 = 'asset' AND mcr.load_terminal_id::text = $1)
+		)
+		ORDER BY mcr.event_date DESC NULLS LAST, mcr.confidence DESC
+		LIMIT $4
+	`, id, entityType, strings.TrimSpace(name), limit)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	out := []map[string]any{}
+	for rows.Next() {
+		if item := s.scanMeridianCargo(ctx, rows); item != nil {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+func (s *Server) scanMeridianCargo(ctx context.Context, rows interface{ Scan(dest ...any) error }) map[string]any {
+	var id, vesselName, imo, mmsi, product, loadPort, loadCountry, dischargePort, dischargeCountry, unit, method, observedAt, evidence string
+	var shipperName, consigneeName, shipperCompanyID, consigneeCompanyID, vesselID, vesselClass, owner, operator, ownerCompanyID, operatorCompanyID, ownerProfile string
+	var low, best, high, confidence float64
+	if err := rows.Scan(&id, &vesselName, &imo, &mmsi, &product, &loadPort, &loadCountry, &dischargePort, &dischargeCountry,
+		&low, &best, &high, &unit, &method, &confidence, &observedAt, &evidence,
+		&shipperName, &consigneeName, &shipperCompanyID, &consigneeCompanyID, &vesselID, &vesselClass, &owner, &operator, &ownerCompanyID, &operatorCompanyID, &ownerProfile); err != nil {
+		return nil
+	}
+	decodedDestination := decodeAISDestination(dischargePort)
+	chain := buildCargoCommercialContext(ctx, s.pool, cargoCommercialContextInput{
+		Source:             "meridian_cargo_records",
+		VesselID:           vesselID,
+		VesselName:         vesselName,
+		IMO:                imo,
+		MMSI:               mmsi,
+		VesselClass:        vesselClass,
+		OwnerName:          owner,
+		OperatorName:       operator,
+		OwnerCompanyID:     ownerCompanyID,
+		OperatorCompanyID:  operatorCompanyID,
+		OwnerProfileJSON:   ownerProfile,
+		ShipperName:        shipperName,
+		ConsigneeName:      consigneeName,
+		ShipperCompanyID:   shipperCompanyID,
+		ConsigneeCompanyID: consigneeCompanyID,
+		ProductFamily:      product,
+		LoadPort:           loadPort,
+		LoadCountry:        loadCountry,
+		DischargePort:      dischargePort,
+		DischargeCountry:   dischargeCountry,
+		RouteSource:        "meridian_cargo_record",
+		RouteConfidence:    confidence,
+		DecodedDestination: decodedDestination,
+		QuantityMethod:     method,
+		EvidenceLabel:      "inferred",
+	})
+	routeHint := map[string]any{"source": "meridian_cargo_record", "confidence_score": confidence}
+	if len(decodedDestination) > 0 {
+		routeHint["decoded_destination"] = decodedDestination
+	}
+	return map[string]any{
 		"id":               id,
-		"type":             "vessel",
-		"name":             name,
+		"source":           "meridian_cargo_records",
+		"vessel_id":        vesselID,
+		"vessel_name":      vesselName,
 		"imo":              imo,
 		"mmsi":             mmsi,
-		"vessel_type":      vesselType,
 		"vessel_class":     vesselClass,
-		"deadweight_tons":  dwt,
-		"owner":            map[string]string{"company_id": ownerID, "name": ownerName},
-		"operator":         map[string]string{"company_id": operatorID, "name": operatorName},
-		"roles":            []string{"shipowner_route_evidence"},
-		"confidence_score": confidence,
-		"evidence_label":   "reported",
-	})
+		"owner_name":       owner,
+		"operator_name":    operator,
+		"product_family":   product,
+		"load":             map[string]string{"port": loadPort, "country": loadCountry},
+		"discharge":        map[string]string{"port": dischargePort, "country": dischargeCountry},
+		"route_hint":       routeHint,
+		"quantity":         map[string]any{"low": low, "best": best, "high": high, "unit": unit, "method": method},
+		"confidence":       confidence,
+		"observed_at":      observedAt,
+		"evidence":         jsonBlock(evidence, "[]"),
+		"evidence_label":   "inferred",
+		"commercial_chain": chain,
+	}
+}
+
+func (s *Server) profileImporters(ctx context.Context, entityType, id, name, country string, limit int) []map[string]any {
+	rows, err := s.pool.Query(ctx, `
+		WITH target_asset AS (
+			SELECT
+				a.id::text AS asset_id,
+				COALESCE(a.name, '') AS asset_name,
+				COALESCE(a.country_code, '') AS country_code,
+				COALESCE(op.id::text, '') AS operator_company_id,
+				COALESCE(op.name, '') AS operator_name,
+				COALESCE(own.id::text, '') AS owner_company_id,
+				COALESCE(own.name, '') AS owner_name
+			FROM assets a
+			LEFT JOIN companies op ON op.id = a.operator_company_id
+			LEFT JOIN companies own ON own.id = a.owner_company_id
+			WHERE a.id::text = $1
+			LIMIT 1
+		),
+		matched AS (
+			SELECT t.*
+			FROM trade_flow_facts t
+			LEFT JOIN target_asset ta ON true
+			WHERE t.source_key = 'eia_company_imports'
+			  AND t.flow_code = 'IMPORT'
+			  AND t.participant_name IS NOT NULL
+			  AND (
+				($2 = 'company' AND (
+					t.participant_company_id::text = $1
+					OR ($3 <> '' AND t.participant_name ILIKE '%' || $3 || '%')
+				))
+				OR ($2 = 'asset' AND (
+					t.participant_company_id::text IN (ta.operator_company_id, ta.owner_company_id)
+					OR (ta.operator_name <> '' AND t.participant_name ILIKE '%' || ta.operator_name || '%')
+					OR (ta.owner_name <> '' AND t.participant_name ILIKE '%' || ta.owner_name || '%')
+					OR (ta.asset_name <> '' AND t.participant_name ILIKE '%' || ta.asset_name || '%')
+					OR (ta.country_code <> '' AND t.reporter_country_code ILIKE ta.country_code)
+				))
+			  )
+		)
+		SELECT
+			COALESCE(participant_company_id::text, ''),
+			COALESCE(participant_name, ''),
+			COALESCE(product_code, ''),
+			COALESCE(MAX(NULLIF(product_name, '')), ''),
+			COALESCE(partner_country_code, ''),
+			COALESCE(SUM(quantity), 0)::double precision,
+			COALESCE(MAX(quantity_unit), ''),
+			COUNT(*)::int,
+			COALESCE(MAX(month)::text, ''),
+			COUNT(DISTINCT NULLIF(port_code, ''))::int,
+			ARRAY_REMOVE(ARRAY_AGG(DISTINCT NULLIF(port_state, '') ORDER BY NULLIF(port_state, '')), NULL)
+		FROM matched
+		GROUP BY participant_company_id, participant_name, product_code, partner_country_code
+		ORDER BY MAX(month) DESC NULLS LAST, SUM(quantity) DESC NULLS LAST
+		LIMIT $4
+	`, id, entityType, strings.TrimSpace(name), limit)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	out := []map[string]any{}
+	for rows.Next() {
+		var companyID, participantName, productCode, productName, originCountry, unit, latestMonth string
+		var totalQuantity float64
+		var factRows, portCount int
+		var states []string
+		if err := rows.Scan(&companyID, &participantName, &productCode, &productName, &originCountry, &totalQuantity, &unit, &factRows, &latestMonth, &portCount, &states); err != nil {
+			continue
+		}
+		out = append(out, map[string]any{
+			"company_id":   companyID,
+			"name":         participantName,
+			"product_code": productCode,
+			"product_name": productName,
+			"origin_country": map[string]string{
+				"country_code": originCountry,
+			},
+			"quantity":       map[string]any{"value": totalQuantity, "unit": unit},
+			"rows":           factRows,
+			"latest_month":   latestMonth,
+			"port_count":     portCount,
+			"port_states":    states,
+			"evidence_label": "reported",
+			"source":         "eia_company_imports",
+		})
+	}
+	return out
+}
+
+func (s *Server) profileSTSPredictions(ctx context.Context, entityType, id, name string, limit int) []map[string]any {
+	if entityType != "vessel" {
+		return nil
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT
+			id::text,
+			signal_type,
+			COALESCE(entity_type, ''),
+			COALESCE(entity_id::text, ''),
+			tier,
+			COALESCE(confidence_score, 0),
+			COALESCE(horizon_hours, 0),
+			COALESCE(payload, '{}'::jsonb)::text,
+			COALESCE(predicted_at::text, ''),
+			COALESCE(expires_at::text, '')
+		FROM predictive_signals
+		WHERE signal_type = 'commercial_sts_v1'
+		  AND (expires_at IS NULL OR expires_at > now())
+		  AND (
+			entity_id::text = $1
+			OR payload->>'mmsi_a' = $1
+			OR payload->>'mmsi_b' = $1
+			OR payload->>'vessel_a_mmsi' = $1
+			OR payload->>'vessel_b_mmsi' = $1
+			OR ($2 <> '' AND (
+				payload->>'vessel_a_name' ILIKE '%' || $2 || '%'
+				OR payload->>'vessel_b_name' ILIKE '%' || $2 || '%'
+				OR payload->>'vessel_a' ILIKE '%' || $2 || '%'
+				OR payload->>'vessel_b' ILIKE '%' || $2 || '%'
+			))
+		  )
+		ORDER BY predicted_at DESC NULLS LAST, confidence_score DESC
+		LIMIT $3
+	`, id, strings.TrimSpace(name), limit)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	out := []map[string]any{}
+	for rows.Next() {
+		var id, signalType, rowEntityType, entityID, tier, payload, predictedAt, expiresAt string
+		var confidence float64
+		var horizon int
+		if err := rows.Scan(&id, &signalType, &rowEntityType, &entityID, &tier, &confidence, &horizon, &payload, &predictedAt, &expiresAt); err != nil {
+			continue
+		}
+		out = append(out, map[string]any{
+			"id":               id,
+			"signal_type":      signalType,
+			"entity_type":      rowEntityType,
+			"entity_id":        entityID,
+			"tier":             tier,
+			"confidence_score": confidence,
+			"horizon_hours":    horizon,
+			"payload":          jsonBlock(payload, "{}"),
+			"predicted_at":     predictedAt,
+			"expires_at":       expiresAt,
+			"evidence_label":   "predicted",
+		})
+	}
+	return out
+}
+
+func (s *Server) profileMarketPressure(ctx context.Context, country, commodity string, limit int) []map[string]any {
+	country = strings.TrimSpace(country)
+	if country == "" {
+		return nil
+	}
+	productHints, _ := intelBenchmarkHints(commodity)
+	rows, err := s.pool.Query(ctx, `
+		SELECT country_code, product_code, month::text,
+		       COALESCE(buyer_pressure_score, 0)::double precision,
+		       COALESCE(supplier_availability_score, 0)::double precision,
+		       COALESCE(stock_pressure_score, 0)::double precision,
+		       COALESCE(import_pressure_score, 0)::double precision,
+		       COALESCE(export_pressure_score, 0)::double precision,
+		       COALESCE(refinery_pressure_score, 0)::double precision,
+		       baseline_years,
+		       COALESCE(components, '{}'::jsonb)::text,
+		       evidence_label,
+		       COALESCE(confidence_score, 0)::double precision,
+		       generated_at::text
+		FROM market_pressure_scores
+		WHERE country_code ILIKE $1
+		  AND (array_length($2::text[], 1) IS NULL OR product_code = ANY($2::text[]))
+		ORDER BY month DESC, buyer_pressure_score DESC, supplier_availability_score DESC
+		LIMIT $3
+	`, country, productHints, limit)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	out := []map[string]any{}
+	for rows.Next() {
+		var rowCountry, product, month, components, evidenceLabel, generatedAt string
+		var buyer, supplier, stock, imports, exports, refinery, confidence float64
+		var baselineYears int
+		if err := rows.Scan(&rowCountry, &product, &month, &buyer, &supplier, &stock, &imports, &exports, &refinery, &baselineYears, &components, &evidenceLabel, &confidence, &generatedAt); err != nil {
+			continue
+		}
+		out = append(out, map[string]any{
+			"country_code":                rowCountry,
+			"product_code":                product,
+			"month":                       month,
+			"buyer_pressure_score":        buyer,
+			"supplier_availability_score": supplier,
+			"components": map[string]any{
+				"stock_pressure":    stock,
+				"import_pressure":   imports,
+				"export_pressure":   exports,
+				"refinery_pressure": refinery,
+				"raw":               jsonBlock(components, "{}"),
+			},
+			"baseline_years":   baselineYears,
+			"evidence_label":   evidenceLabel,
+			"confidence_score": confidence,
+			"generated_at":     generatedAt,
+		})
+	}
+	return out
+}
+
+func (s *Server) companyCommercialAssets(ctx context.Context, companyID string) []map[string]any {
+	rows, err := s.pool.Query(ctx, `
+		SELECT
+			a.id::text,
+			COALESCE(a.name, ''),
+			COALESCE(a.asset_type, ''),
+			COALESCE(a.country_code, ''),
+			COALESCE(a.commodities_supported, ARRAY[]::text[]),
+			CASE
+				WHEN a.operator_company_id::text = $1 AND a.owner_company_id::text = $1 THEN 'operator_owner'
+				WHEN a.operator_company_id::text = $1 THEN 'operator'
+				WHEN a.owner_company_id::text = $1 THEN 'owner'
+				ELSE 'linked'
+			END,
+			a.latitude,
+			a.longitude,
+			COALESCE(a.confidence_score, 0)::double precision,
+			COALESCE(a.raw_source_payload, '{}'::jsonb)::text
+		FROM assets a
+		WHERE a.operator_company_id::text = $1 OR a.owner_company_id::text = $1
+		ORDER BY a.confidence_score DESC NULLS LAST, a.name
+		LIMIT 25
+	`, companyID)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	out := []map[string]any{}
+	for rows.Next() {
+		var id, name, assetType, country, role, raw string
+		var commodities []string
+		var lat, lng *float64
+		var confidence float64
+		if err := rows.Scan(&id, &name, &assetType, &country, &commodities, &role, &lat, &lng, &confidence, &raw); err != nil {
+			continue
+		}
+		row := map[string]any{
+			"asset_id":         id,
+			"name":             name,
+			"asset_type":       assetType,
+			"country_code":     country,
+			"commodities":      commodities,
+			"role":             role,
+			"confidence_score": confidence,
+			"evidence_label":   "reported",
+			"raw_source":       jsonBlock(raw, "{}"),
+		}
+		if lat != nil && lng != nil {
+			row["coordinates"] = map[string]float64{"latitude": *lat, "longitude": *lng}
+		}
+		out = append(out, row)
+	}
+	return out
+}
+
+func (s *Server) assetOwnershipIntel(ctx context.Context, assetID string) []map[string]any {
+	rows, err := s.pool.Query(ctx, `
+		SELECT
+			COALESCE(ga.gem_asset_id, ''),
+			COALESCE(ga.gem_unit_id, ''),
+			COALESCE(ga.asset_name, ''),
+			COALESCE(ga.asset_type, ''),
+			COALESCE(ga.country_code, ''),
+			COALESCE(ga.operator_entity_id, ''),
+			COALESCE(op.name, ''),
+			COALESCE(ga.owner_entity_id, ''),
+			COALESCE(owner.name, ''),
+			COALESCE(ga.parent_entity_id, ''),
+			COALESCE(parent.name, ''),
+			COALESCE(ga.share_pct, 0)::double precision,
+			COALESCE(ga.share_imputed, false),
+			ga.evidence_label,
+			COALESCE(ga.raw_payload, '{}'::jsonb)::text
+		FROM gem_asset_ownership ga
+		LEFT JOIN gem_entities op ON op.entity_id = ga.operator_entity_id
+		LEFT JOIN gem_entities owner ON owner.entity_id = ga.owner_entity_id
+		LEFT JOIN gem_entities parent ON parent.entity_id = ga.parent_entity_id
+		WHERE ga.asset_id::text = $1
+		ORDER BY ga.share_pct DESC NULLS LAST, ga.created_at DESC
+		LIMIT 20
+	`, assetID)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	out := []map[string]any{}
+	for rows.Next() {
+		var gemAssetID, gemUnitID, assetName, assetType, country, operatorID, operatorName, ownerID, ownerName, parentID, parentName, evidenceLabel, raw string
+		var share float64
+		var shareImputed bool
+		if err := rows.Scan(&gemAssetID, &gemUnitID, &assetName, &assetType, &country, &operatorID, &operatorName, &ownerID, &ownerName, &parentID, &parentName, &share, &shareImputed, &evidenceLabel, &raw); err != nil {
+			continue
+		}
+		out = append(out, map[string]any{
+			"gem_asset_id":   gemAssetID,
+			"gem_unit_id":    gemUnitID,
+			"asset_name":     assetName,
+			"asset_type":     assetType,
+			"country_code":   country,
+			"operator":       map[string]string{"entity_id": operatorID, "name": operatorName},
+			"owner":          map[string]string{"entity_id": ownerID, "name": ownerName},
+			"parent":         map[string]string{"entity_id": parentID, "name": parentName},
+			"share_pct":      share,
+			"share_imputed":  shareImputed,
+			"evidence_label": evidenceLabel,
+			"raw_source":     jsonBlock(raw, "{}"),
+		})
+	}
+	return out
+}
+
+func (s *Server) entityInvestorExposures(ctx context.Context, entityType, id string, limit int) []map[string]any {
+	rows, err := s.pool.Query(ctx, `
+		SELECT
+			id::text,
+			COALESCE(investor_entity_id, ''),
+			investor_name,
+			COALESCE(exposed_entity_id, ''),
+			COALESCE(exposed_company_id::text, ''),
+			COALESCE(exposed_asset_id::text, ''),
+			exposure_type,
+			COALESCE(commodity, ''),
+			COALESCE(country_code, ''),
+			COALESCE(exposure_value, 0)::double precision,
+			COALESCE(exposure_unit, ''),
+			COALESCE(share_pct, 0)::double precision,
+			evidence_label,
+			COALESCE(confidence_score, 0)::double precision,
+			COALESCE(raw_payload, '{}'::jsonb)::text
+		FROM private_equity_exposures
+		WHERE ($1 = 'asset' AND exposed_asset_id::text = $2)
+		   OR ($1 = 'company' AND exposed_company_id::text = $2)
+		ORDER BY confidence_score DESC, exposure_value DESC NULLS LAST
+		LIMIT $3
+	`, entityType, id, limit)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	out := []map[string]any{}
+	for rows.Next() {
+		var exposureID, investorEntity, investorName, exposedEntity, companyID, assetID, exposureType, commodity, country, unit, evidenceLabel, raw string
+		var exposureValue, share, confidence float64
+		if err := rows.Scan(&exposureID, &investorEntity, &investorName, &exposedEntity, &companyID, &assetID, &exposureType, &commodity, &country, &exposureValue, &unit, &share, &evidenceLabel, &confidence, &raw); err != nil {
+			continue
+		}
+		out = append(out, map[string]any{
+			"id":                 exposureID,
+			"investor_entity_id": investorEntity,
+			"investor_name":      investorName,
+			"exposed_entity_id":  exposedEntity,
+			"exposed_company_id": companyID,
+			"exposed_asset_id":   assetID,
+			"exposure_type":      exposureType,
+			"commodity":          commodity,
+			"country_code":       country,
+			"exposure_value":     exposureValue,
+			"exposure_unit":      unit,
+			"share_pct":          share,
+			"evidence_label":     evidenceLabel,
+			"confidence_score":   confidence,
+			"raw_payload":        jsonBlock(raw, "{}"),
+		})
+	}
+	return out
 }
 
 func (s *Server) companyContacts(r *http.Request, companyID string) []map[string]any {

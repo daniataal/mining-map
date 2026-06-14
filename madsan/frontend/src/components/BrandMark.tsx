@@ -1,4 +1,7 @@
-import { BRAND_LOGO_URL, BRAND_NAME_SHORT } from "@/lib/brand";
+"use client";
+
+import { BRAND_LOGO_DARK_URL, BRAND_LOGO_URL, BRAND_NAME_SHORT } from "@/lib/brand";
+import { useTheme } from "@/contexts/ThemeContext";
 
 type BrandMarkSize = "sm" | "md" | "lg" | "header";
 
@@ -17,17 +20,19 @@ const sizeClass: Record<BrandMarkSize, string> = {
 };
 
 export default function BrandMark({ size = "md", variant = "full", className = "" }: Props) {
+  const { theme } = useTheme();
+  const logoSrc = theme === "light" ? BRAND_LOGO_DARK_URL : BRAND_LOGO_URL;
   const cls = `${sizeClass[size]} brand-mark ${className}`.trim();
 
   if (variant === "emblem") {
     return (
       <span className={`brand-mark-emblem-wrap ${sizeClass[size]} ${className}`.trim()} title={BRAND_NAME_SHORT}>
-        <img src={BRAND_LOGO_URL} alt={BRAND_NAME_SHORT} className="brand-mark-emblem" draggable={false} />
+        <img src={logoSrc} alt={BRAND_NAME_SHORT} className="brand-mark-emblem" draggable={false} />
       </span>
     );
   }
 
   return (
-    <img src={BRAND_LOGO_URL} alt={BRAND_NAME_SHORT} className={cls} draggable={false} title={BRAND_NAME_SHORT} />
+    <img src={logoSrc} alt={BRAND_NAME_SHORT} className={cls} draggable={false} title={BRAND_NAME_SHORT} />
   );
 }

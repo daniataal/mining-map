@@ -20,6 +20,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { FeatureCollection } from "geojson";
 import { Badge } from "@/components/ui/badge";
 import { confidenceTierClass, confidenceTierLabel } from "@/lib/confidenceTier";
+import ThemeToggle from "@/components/ThemeToggle";
 import UserMenu from "@/components/auth/UserMenu";
 import { useAuth } from "@/contexts/AuthContext";
 import { authFetchOpts } from "@/lib/auth";
@@ -207,6 +208,7 @@ export default function TerminalShell() {
           Search ⌘K
         </button>
         <span className="ticker-spacer" />
+        <ThemeToggle compact />
         <UserMenu compact />
       </div>
       <SearchPalette

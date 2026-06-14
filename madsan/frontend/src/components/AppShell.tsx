@@ -1,6 +1,7 @@
 "use client";
 
 import BrandMark from "@/components/BrandMark";
+import ThemeToggle from "@/components/ThemeToggle";
 import UserMenu from "@/components/auth/UserMenu";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -42,7 +43,10 @@ export default function AppShell({ children, maxWidth = 960 }: Props) {
             </Link>
           ))}
         </nav>
-        <UserMenu />
+        <div className="app-shell-actions">
+          <ThemeToggle compact />
+          <UserMenu />
+        </div>
       </header>
       <main
         className="app-shell-main"

@@ -1,5 +1,6 @@
 "use client";
 
+import ThemeToggle from "@/components/ThemeToggle";
 import { useAuth } from "@/contexts/AuthContext";
 import { ChevronDown, LogOut, User } from "lucide-react";
 import { loginHref } from "@/lib/authRedirect";
@@ -78,6 +79,9 @@ export default function UserMenu({ compact = false }: Props) {
           <Link href="/account" className="user-menu-item" role="menuitem" onClick={() => setOpen(false)}>
             Account &amp; plan
           </Link>
+          <div className="user-menu-item theme-menu-row" role="none">
+            <ThemeToggle />
+          </div>
           <button
             type="button"
             className="user-menu-item danger"

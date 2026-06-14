@@ -193,6 +193,49 @@ export type IntelInvestorPath = {
   generated_at?: string;
 };
 
+export type IntelCommercialProfile = {
+  id?: string;
+  type?: "asset" | "company" | "vessel" | string;
+  name?: string;
+  country_code?: string;
+  asset_type?: string;
+  vessel_type?: string;
+  vessel_class?: string;
+  imo?: string;
+  mmsi?: string;
+  deadweight_tons?: number;
+  commodities?: string[];
+  roles?: string[];
+  owner?: Record<string, unknown>;
+  operator?: Record<string, unknown>;
+  contacts?: Array<Record<string, unknown>>;
+  commercial_contacts?: Array<Record<string, unknown>>;
+  ownership_chain?: Array<Record<string, unknown>>;
+  ownership_intel?: Record<string, unknown>;
+  investor_exposures?: Array<Record<string, unknown>>;
+  name_history?: Array<Record<string, unknown>>;
+  owner_profile?: Record<string, unknown>;
+  linked_intel?: {
+    entity_type?: string;
+    entity_id?: string;
+    entity_name?: string;
+    evidence_label?: string;
+    investor_paths?: IntelInvestorPath[];
+    opportunities?: IntelOpportunity[];
+    cargo_movements?: IntelCargoMovement[];
+    importers?: IntelImporter[];
+    sts_predictions?: IntelSTSPrediction[];
+    market_pressure?: Array<Record<string, unknown>>;
+    benchmarks?: Array<Record<string, unknown>>;
+    assets?: Array<Record<string, unknown>>;
+    ownership_chain?: Array<Record<string, unknown>>;
+    investor_exposures?: Array<Record<string, unknown>>;
+    limitations?: string[];
+  };
+  confidence_score?: number;
+  evidence_label?: string;
+};
+
 export async function fetchShipvaultCompany(companyId: string): Promise<ShipvaultCompany | null> {
   const res = await fetch(`${API_BASE}/api/energy/shipvault/companies/${encodeURIComponent(companyId)}`, authFetchOpts);
   if (!res.ok) return null;
@@ -579,6 +622,18 @@ export async function fetchIntelInvestorPaths(params?: {
   if (!res.ok) return [];
   const data = (await res.json()) as { items?: IntelInvestorPath[] };
   return data.items ?? [];
+}
+
+export async function fetchIntelCommercialProfile(
+  entityType: "asset" | "company" | "vessel" | string,
+  id: string,
+): Promise<IntelCommercialProfile | null> {
+  const res = await fetch(
+    `${API_BASE}/api/intel/entities/${encodeURIComponent(entityType)}/${encodeURIComponent(id)}/commercial-profile`,
+    authFetchOpts,
+  );
+  if (!res.ok) return null;
+  return res.json() as Promise<IntelCommercialProfile>;
 }
 
 export async function fetchIntelArbitrage(params: {

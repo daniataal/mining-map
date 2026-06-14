@@ -24,8 +24,16 @@ export type LayerDef = {
   color?: string;
 };
 
-/** Vector basemap — free, keyless, dark navy with borders + labels. */
-export const MAP_STYLE_URL = "https://tiles.openfreemap.org/styles/dark";
+/** Vector basemap — free, keyless OpenFreeMap styles. */
+export const MAP_STYLE_URL_DARK = "https://tiles.openfreemap.org/styles/dark";
+export const MAP_STYLE_URL_LIGHT = "https://tiles.openfreemap.org/styles/liberty";
+
+/** @deprecated use mapStyleForTheme */
+export const MAP_STYLE_URL = MAP_STYLE_URL_DARK;
+
+export function mapStyleForTheme(theme: "light" | "dark"): string {
+  return theme === "light" ? MAP_STYLE_URL_LIGHT : MAP_STYLE_URL_DARK;
+}
 
 /** Curated map palette — keep legend + layer paint in sync. */
 export const MAP_COLORS = {
