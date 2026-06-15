@@ -174,7 +174,7 @@ services:
     stop_grace_period: 10s
     # HTTP-only: inherits ./Caddyfile from docker-compose.yml.
     # TLS cutover: swap volumes per deploy/Caddyfile.prod.tls.example (hostname + madsan_caddy_data/config).
-    ports: !reset
+    ports: !override
       - "${MADSAN_CADDY_HTTP:-80}:80"
     depends_on:
       madsan-api:
