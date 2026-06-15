@@ -1,8 +1,18 @@
-# Legacy mining-map / oil-live-intel base images. MadSan builds from madsan/deploy/Dockerfile.*.
-name: Build Base Images (legacy, manual)
+name: Build Base Images
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "backend/requirements.txt"
+      - "mining-viz/package.json"
+      - "mining-viz/package-lock.json"
+      - "oil-live-intel/go.mod"
+      - "oil-live-intel/go.sum"
+      - "Dockerfile.base"
+      - "oil-live-intel/Dockerfile.base"
+      - ".github/workflows/build-base.yml"
 
 jobs:
   build-base:

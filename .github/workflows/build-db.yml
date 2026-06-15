@@ -1,5 +1,4 @@
-# Legacy mining-db image — MadSan uses postgis/postgis:16-3.4 in deploy/docker-compose.yml.
-name: "Build Custom PostGIS Database (legacy, manual)"
+name: "Build Custom PostGIS Database"
 
 on:
   workflow_dispatch:

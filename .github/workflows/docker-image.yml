@@ -1,9 +1,19 @@
-# DEPRECATED for auto CI — mining-viz frontend + legacy Python backend deploy.
-# MadSan CI: .github/workflows/madsan-*.yml (no VM deploy). Manual deploy only.
-name: Docker Image CI and Remote Deployment (legacy, manual)
+name: Docker Image CI and Remote Deployment
 
 on:
   workflow_dispatch:
+  push:
+    branches: [ "main" ]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - ".paperclip/**"
+  pull_request:
+    branches: [ "main" ]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - ".paperclip/**"
 
 jobs:
   meta:
