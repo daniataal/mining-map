@@ -143,7 +143,6 @@ jobs:
           IMAGE_TAG: ${{ needs.gate.outputs.image_tag }}
           MADSAN_DEPLOY_PATH: /opt/madsan
           LEGACY_DEPLOY_PATH: /opt/mining-map
-          COMPOSE_PROJECT_NAME: madsan
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_TOKEN: ${{ github.token }}
         with:
@@ -151,14 +150,14 @@ jobs:
           username: ${{ secrets.REMOTE_USER || secrets.MADSAN_DEPLOY_USER }}
           key: ${{ secrets.REMOTE_SSH_KEY || secrets.MADSAN_DEPLOY_SSH_KEY }}
           port: 22
-          envs: DEPLOY_SHA,DEPLOY_REF,IMAGE_TAG,MADSAN_DEPLOY_PATH,LEGACY_DEPLOY_PATH,COMPOSE_PROJECT_NAME,GITHUB_REPOSITORY,GITHUB_TOKEN
+          envs: DEPLOY_SHA,DEPLOY_REF,IMAGE_TAG,MADSAN_DEPLOY_PATH,LEGACY_DEPLOY_PATH,GITHUB_REPOSITORY,GITHUB_TOKEN
           script_stop: true
           script: |
             set -euo pipefail
 
             DEPLOY_PATH="${MADSAN_DEPLOY_PATH:-/opt/madsan}"
             LEGACY_PATH="${LEGACY_DEPLOY_PATH:-/opt/mining-map}"
-            export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-madsan}"
+            MADSAN_PROJECT="madsan"
 
             if ! command -v docker >/dev/null 2>&1; then
               echo "ERROR: docker not found in PATH (PATH=${PATH})"
@@ -205,11 +204,11 @@ jobs:
               fi
               echo "Stopping legacy mining-map stack at ${legacy_path} (volumes preserved)..."
               local down_ok=false
-              if (cd "${legacy_path}" && docker compose -f docker-compose.prod.yml down --remove-orphans); then
+              if (cd "${legacy_path}" && docker compose -p mining-map -f docker-compose.prod.yml down --remove-orphans); then
                 down_ok=true
-              elif (cd "${legacy_path}" && sudo docker compose -f docker-compose.prod.yml down --remove-orphans); then
+              elif (cd "${legacy_path}" && sudo docker compose -p mining-map -f docker-compose.prod.yml down --remove-orphans); then
                 down_ok=true
-              elif (cd "${legacy_path}" && sudo docker-compose -f docker-compose.prod.yml down --remove-orphans); then
+              elif (cd "${legacy_path}" && sudo docker-compose -p mining-map -f docker-compose.prod.yml down --remove-orphans); then
                 down_ok=true
               fi
               if [ "${down_ok}" = "true" ]; then
@@ -375,8 +374,15 @@ jobs:
             _step "legacy stack shutdown"
             _stop_legacy_stack "${LEGACY_PATH}"
 
-            cd "${REPO_ROOT}/${COMPOSE_DIR}"
-            COMPOSE_BASE=(docker compose -f docker-compose.yml -f docker-compose.prod.yml)
+            COMPOSE_PROD="${REPO_ROOT}/madsan/scripts/compose_prod.sh"
+            if [ ! -x "${COMPOSE_PROD}" ]; then
+              chmod +x "${COMPOSE_PROD}"
+            fi
+            if [ ! -f "${COMPOSE_PROD}" ]; then
+              echo "ERROR: missing ${COMPOSE_PROD}"
+              exit 1
+            fi
+
             PROFILES=(--profile proxy)
             if grep -Eq '^AISSTREAM_API_KEY=.+$' "${ENV_FILE}"; then
               PROFILES+=(--profile ais)
@@ -395,13 +401,13 @@ jobs:
             fi
 
             PULL_OK=true
-            if ! "${COMPOSE_BASE[@]}" "${PROFILES[@]}" pull "${PULL_SERVICES[@]}"; then
+            if ! "${COMPOSE_PROD}" "${PROFILES[@]}" pull "${PULL_SERVICES[@]}"; then
               echo "Registry pull failed - falling back to on-VM build"
               PULL_OK=false
             fi
 
             if [ "${PULL_OK}" = "false" ]; then
-              "${COMPOSE_BASE[@]}" "${PROFILES[@]}" build --pull
+              "${COMPOSE_PROD}" "${PROFILES[@]}" build --pull
             fi
 
             CRITICAL_SERVICES=(madsan-db madsan-api madsan-worker madsan-scheduler madsan-frontend caddy)
@@ -411,18 +417,18 @@ jobs:
 
             _step "compose up"
             echo "Bringing up stack (waiting for healthchecks)..."
-            if ! "${COMPOSE_BASE[@]}" "${PROFILES[@]}" up -d --remove-orphans --wait --wait-timeout 180; then
+            if ! "${COMPOSE_PROD}" "${PROFILES[@]}" up -d --remove-orphans --wait --wait-timeout 180; then
               echo "WARN: compose --wait failed or timed out - falling back to manual health poll"
-              if "${COMPOSE_BASE[@]}" "${PROFILES[@]}" ps --format json 2>/dev/null | grep -q 'does not provide the specified platform'; then
+              if "${COMPOSE_PROD}" "${PROFILES[@]}" ps --format json 2>/dev/null | grep -q 'does not provide the specified platform'; then
                 echo "HINT: arm64 VMs need MADSAN_DB_IMAGE=imresamu/postgis:16-3.6.1-bookworm (see docker-compose.prod.yml)"
               fi
-              "${COMPOSE_BASE[@]}" "${PROFILES[@]}" ps || true
+              "${COMPOSE_PROD}" "${PROFILES[@]}" ps || true
             fi
 
             _service_health_ok() {
               local svc="$1"
               local row
-              row="$("${COMPOSE_BASE[@]}" "${PROFILES[@]}" ps --status running --format json "${svc}" 2>/dev/null | head -1 || true)"
+              row="$("${COMPOSE_PROD}" "${PROFILES[@]}" ps --status running --format json "${svc}" 2>/dev/null | head -1 || true)"
               if [ -z "${row}" ]; then
                 return 1
               fi
@@ -458,7 +464,7 @@ jobs:
 
             if [ "${READY}" != "true" ]; then
               echo "ERROR: compose health poll failed"
-              "${COMPOSE_BASE[@]}" "${PROFILES[@]}" ps
+              "${COMPOSE_PROD}" "${PROFILES[@]}" ps
               exit 1
             fi
             echo "Compose health checks passed for: ${CRITICAL_SERVICES[*]}"
@@ -476,16 +482,16 @@ jobs:
 
             if [ "${CURL_OK}" != "true" ]; then
               echo "ERROR: Caddy → API health check failed after deploy"
-              "${COMPOSE_BASE[@]}" "${PROFILES[@]}" ps
+              "${COMPOSE_PROD}" "${PROFILES[@]}" ps
               exit 1
             fi
             echo "Edge health check passed: http://127.0.0.1/health"
 
             _step "scoped image cleanup"
-            echo "Scoped image cleanup (project=${COMPOSE_PROJECT_NAME})..."
+            echo "Scoped image cleanup (project=${MADSAN_PROJECT})..."
             docker image prune -f
 
-            mapfile -t PROJECT_IMAGES < <(docker images -q --filter "label=com.docker.compose.project=${COMPOSE_PROJECT_NAME}" 2>/dev/null | sort -u || true)
+            mapfile -t PROJECT_IMAGES < <(docker images -q --filter "label=com.docker.compose.project=${MADSAN_PROJECT}" 2>/dev/null | sort -u || true)
             for img_id in "${PROJECT_IMAGES[@]:-}"; do
               [ -z "${img_id}" ] && continue
               if [ -z "$(docker ps -aq --filter "ancestor=${img_id}" 2>/dev/null)" ]; then
@@ -496,4 +502,4 @@ jobs:
             docker builder prune -f --filter "until=48h" 2>/dev/null || true
 
             echo "Deploy complete."
-            "${COMPOSE_BASE[@]}" ps
+            "${COMPOSE_PROD}" ps

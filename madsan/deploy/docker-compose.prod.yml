@@ -5,9 +5,7 @@
 #
 # Usage (from repo root):
 #   cp madsan/deploy/.env.example madsan/deploy/.env   # secrets + LEGACY_DATABASE_URL
-#   docker compose -f madsan/deploy/docker-compose.yml \
-#     -f madsan/deploy/docker-compose.prod.yml \
-#     --profile proxy up -d --build
+#   ./madsan/scripts/compose_prod.sh --profile proxy up -d
 #
 # Rollback: drop the prod overlay file from the command (reverts to dev compose).
 #

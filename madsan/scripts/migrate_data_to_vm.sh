@@ -274,7 +274,7 @@ fi
 
 echo "Starting stack..."
 cd /opt/madsan
-COMPOSE_PROJECT_NAME=madsan docker compose -f madsan/deploy/docker-compose.yml -f madsan/deploy/docker-compose.prod.yml --profile proxy up -d --remove-orphans
+./madsan/scripts/compose_prod.sh --profile proxy up -d --remove-orphans
 
 echo "Post-restore counts:"
 docker exec "$CID" psql -U postgres -d "$DB_NAME" -t -c \

@@ -95,7 +95,7 @@ docker exec "$CID" pg_restore -U postgres -d madsan_db --no-owner --no-acl /tmp/
 docker exec "$CID" rm -f /tmp/restore.dump
 
 cd /opt/madsan
-COMPOSE_PROJECT_NAME=madsan docker compose -f madsan/deploy/docker-compose.yml -f madsan/deploy/docker-compose.prod.yml --profile proxy up -d
+./madsan/scripts/compose_prod.sh --profile proxy up -d
 EOF
 ```
 

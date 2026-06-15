@@ -6,6 +6,27 @@ Standalone checkout path on the prod VM: **`/opt/madsan/`** (not `/opt/mining-ma
 
 While MadSan still lives in the `mining-map` monorepo, clone the **full monorepo** to `/opt/madsan` and use compose paths under `madsan/deploy/`. After repo split, the same directory holds a MadSan-only checkout with `deploy/` at the repo root.
 
+## DO NOT run legacy mining-map compose for MadSan
+
+The monorepo also contains the **legacy Meridian/mining-map** stack (`backend`, `oil-live-intel-worker`, `uk-trade-manifest-sync-worker`, `eia-historic-sync-worker`, …) in repo-root `docker-compose.yml` / `docker-compose.prod.yml`. That stack is **not** MadSan.
+
+| Wrong (builds ~14 legacy images as `madsan-*`) | Right (MadSan-only stack) |
+|------------------------------------------------|---------------------------|
+| `cd /opt/madsan && docker compose up -d --build` | `./madsan/scripts/compose_prod.sh --profile proxy up -d` |
+| `COMPOSE_PROJECT_NAME=madsan docker compose -f docker-compose.prod.yml up -d` | `./madsan/scripts/compose_prod.sh --profile proxy up -d` |
+| `docker compose -f docker-compose.prod.yml -f docker-compose.prod.app.yml up -d` | `./madsan/scripts/compose_prod.sh --profile proxy pull` then `up -d` |
+
+**MadSan prod services only:** `madsan-db`, `madsan-api`, `madsan-worker`, `madsan-scheduler`, `madsan-frontend`, `caddy` (+ optional `madsan-ais-ingest` with `--profile ais`).
+
+**Not MadSan:** `backend`, `db`, `frontend`, `oil-live-intel-worker`, `uk-trade-manifest-sync-worker`, `eia-historic-sync-worker`, `oil-live-graph-sync-worker`, etc.
+
+Compose project names are locked in YAML (`name: mining-map` / `name: madsan`), but **`COMPOSE_PROJECT_NAME` in the shell overrides the YAML `name` field**. Do not export `COMPOSE_PROJECT_NAME=madsan` in `.bashrc` or before repo-root compose. Use the wrapper scripts:
+
+- MadSan prod: `./madsan/scripts/compose_prod.sh` (forces `-p madsan`)
+- Legacy mining-map: `./scripts/mining_map_compose.sh` (forces `-p mining-map`)
+
+If `/opt/madsan` is a symlink to `/opt/mining-map`, both paths point at the same repo — always use `./madsan/scripts/compose_prod.sh`, never bare `docker compose up` from that directory.
+
 ## Release pipeline (full chain)
 
 Push to `main` / `master` / `paperclip2` with changes under `madsan/**` or `.github/workflows/madsan-*`:
@@ -164,9 +185,7 @@ cp madsan/deploy/.env.example madsan/deploy/.env   # monorepo
 # OR after split: ./scripts/seed_prod_volumes.sh
 
 # 5. First stack bring-up
-docker compose -f madsan/deploy/docker-compose.yml \
-  -f madsan/deploy/docker-compose.prod.yml \
-  --profile proxy up -d --build
+./madsan/scripts/compose_prod.sh --profile proxy up -d
 # Add --profile ais when AISSTREAM_API_KEY is set in deploy/.env
 ```
 
@@ -215,7 +234,7 @@ After a successful health check, the deploy script:
 
 It does **not** run `docker image prune -a` and does **not** remove legacy mining images — only stops legacy **containers** before bring-up.
 
-Set `COMPOSE_PROJECT_NAME=madsan` so labels stay consistent.
+MadSan prod compose sets `name: madsan` in `madsan/deploy/docker-compose.yml`. Use `./madsan/scripts/compose_prod.sh` so paths and project name stay correct.
 
 ## Cutover from legacy mining-viz
 
@@ -243,10 +262,33 @@ Auto-deploy after publish pins **registry** tags (`IMAGE_TAG=v<N>`) but checks o
 cd /opt/madsan
 git fetch origin
 git checkout <tag-or-sha>
-docker compose -f madsan/deploy/docker-compose.yml \
-  -f madsan/deploy/docker-compose.prod.yml \
-  --profile proxy --profile ais up -d --build
+./madsan/scripts/compose_prod.sh --profile proxy --profile ais up -d
 ```
+
+## Clean up stray legacy stack (mis-run with wrong compose)
+
+If `docker compose build` showed `madsan-backend`, `madsan-oil-live-intel-worker`, or similar, the **repo-root** legacy stack was started with MadSan env — not the MadSan V2 stack.
+
+```bash
+# 1. Stop legacy containers (project mining-map; mis-runs may have used project madsan via COMPOSE_PROJECT_NAME)
+cd /opt/mining-map   # or /opt/madsan if symlinked — same repo root
+./scripts/mining_map_compose.sh -f docker-compose.prod.yml down --remove-orphans 2>/dev/null || true
+docker compose -p madsan -f docker-compose.prod.yml down --remove-orphans 2>/dev/null || true
+
+# 2. Bring up correct MadSan stack only
+cd /opt/madsan
+./madsan/scripts/compose_prod.sh --profile proxy up -d --remove-orphans
+
+# 3. Verify — expect madsan-madsan-api-1, madsan-madsan-db-1, madsan-caddy-1 (not backend/oil-live-intel-worker)
+./madsan/scripts/compose_prod.sh ps
+curl -fsS http://127.0.0.1/health
+
+# 4. Optional: remove unused mis-built images (does not delete volumes)
+docker images --format '{{.Repository}}:{{.Tag}}' | grep -E '^madsan-(backend|oil-live|uk-trade|eia-historic|db|frontend)-' || true
+docker image prune -f
+```
+
+Do **not** run `docker compose down -v` unless you intend to wipe Postgres volumes.
 
 ## Backups
 
@@ -270,9 +312,7 @@ Quick rollback:
 ```bash
 cd /opt/madsan
 git checkout <previous-good-sha>
-docker compose -f madsan/deploy/docker-compose.yml \
-  -f madsan/deploy/docker-compose.prod.yml \
-  --profile proxy up -d --build
+./madsan/scripts/compose_prod.sh --profile proxy up -d
 ```
 
 Restore DB from `backups/` only if schema/data regression requires it.

@@ -1,4 +1,7 @@
 # Production VM stack — registry images only (no build: contexts).
+# LEGACY mining-map only — project name locked to "mining-map" (not MadSan).
+# MadSan prod: ./madsan/scripts/compose_prod.sh --profile proxy up -d
+#
 # Deploy: export VERSION_TAG=v<run> (and secrets via backend.env), then:
 #   docker compose -f docker-compose.prod.yml pull && docker compose -f docker-compose.prod.yml up -d
 # Optional regional workers (need ingest modules in backend image):
@@ -12,6 +15,8 @@
 # (override via MINING_MAP_CADDY_HTTP / MINING_MAP_CADDY_HTTPS). With Caddy, browser uses :8080 for
 # same-origin /api/* proxy; direct access remains :8000 / :5173 / :8095. Frontend image is built with
 # mining-viz/Dockerfile.prod (VITE_API_BASE compile-time; leave empty for Caddy same-origin).
+
+name: mining-map
 
 services:
   backend:

@@ -1,5 +1,11 @@
 # Local stack: maritime demo seeds default to 0 (honest AIS). Synthetic demos require
 # MARITIME_ALLOW_DEMO_SEED=1 plus MARITIME_*_DEMO_SEED in .env (dev-only; not used in prod compose).
+#
+# LEGACY mining-map stack — project name is locked to "mining-map".
+# MadSan prod uses madsan/deploy/docker-compose.yml — see madsan/deploy/DEPLOY.md.
+# DO NOT set COMPOSE_PROJECT_NAME=madsan when running this file.
+
+name: mining-map
 
 services:
   backend:

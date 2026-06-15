@@ -3,7 +3,12 @@
 # Optional reverse proxy: docker compose --profile proxy up -d
 #
 # Hybrid dev (DB only in Docker, API/UI on host): docker compose up -d madsan-db
-# Full stack: ./madsan/scripts/compose_up.sh
+# Full stack (dev): ./madsan/scripts/compose_up.sh
+# Production VM: ./madsan/scripts/compose_prod.sh --profile proxy up -d
+#
+# NOT the legacy mining-map stack (backend, oil-live-intel-worker, uk-trade-manifest-sync-worker).
+
+name: madsan
 
 x-backend-env: &backend-env
   DATABASE_URL: postgresql://postgres:${MADSAN_DB_PASSWORD:-password}@madsan-db:5432/madsan_db?sslmode=disable
