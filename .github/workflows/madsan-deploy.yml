@@ -160,15 +160,21 @@ jobs:
             LEGACY_PATH="${LEGACY_DEPLOY_PATH:-/opt/mining-map}"
             export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-madsan}"
 
-            _ensure_deploy_path_writable() {
+            _ensure_deploy_path_ready() {
               local path="$1"
               if [ -d "${path}" ]; then
-                return 0
+                if [ -w "${path}" ]; then
+                  return 0
+                fi
+                if [ -z "$(ls -A "${path}" 2>/dev/null || true)" ]; then
+                  sudo chown "$(whoami):$(whoami)" "${path}"
+                  return 0
+                fi
+                echo "ERROR: ${path} exists, is not writable, and is not empty"
+                return 1
               fi
-              mkdir -p "${path}" 2>/dev/null || sudo mkdir -p "${path}"
-              if [ ! -w "${path}" ]; then
-                sudo chown "$(whoami):$(whoami)" "${path}" 2>/dev/null || true
-              fi
+              sudo mkdir -p "${path}"
+              sudo chown "$(whoami):$(whoami)" "${path}"
             }
 
             _volume_is_empty() {
@@ -188,10 +194,13 @@ jobs:
 
               echo "Bootstrapping ${DEPLOY_PATH} (not a git checkout)..."
 
-              if [ -d "${LEGACY_PATH}/.git" ]; then
+              if [ -d "${LEGACY_PATH}/.git" ] && [ -r "${LEGACY_PATH}" ]; then
                 if [ ! -e "${DEPLOY_PATH}" ] || [ -z "$(ls -A "${DEPLOY_PATH}" 2>/dev/null || true)" ]; then
                   rm -rf "${DEPLOY_PATH}" 2>/dev/null || sudo rm -rf "${DEPLOY_PATH}" 2>/dev/null || true
-                  ln -sfn "${LEGACY_PATH}" "${DEPLOY_PATH}"
+                  if [ ! -e "${DEPLOY_PATH}" ]; then
+                    sudo ln -sfn "${LEGACY_PATH}" "${DEPLOY_PATH}" 2>/dev/null \
+                      || ln -sfn "${LEGACY_PATH}" "${DEPLOY_PATH}"
+                  fi
                   echo "Linked ${DEPLOY_PATH} -> ${LEGACY_PATH} (legacy checkout)"
                   return 0
                 fi
@@ -212,12 +221,29 @@ jobs:
                 exit 1
               fi
 
-              _ensure_deploy_path_writable "$(dirname "${DEPLOY_PATH}")"
-              rm -rf "${DEPLOY_PATH}" 2>/dev/null || sudo rm -rf "${DEPLOY_PATH}" 2>/dev/null || true
+              _clone_repo() {
+                local target="$1"
+                echo "Cloning https://github.com/${GITHUB_REPOSITORY}.git into ${target}..."
+                git clone "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "${target}"
+                git -C "${target}" remote set-url origin "https://github.com/${GITHUB_REPOSITORY}.git"
+              }
 
-              echo "Cloning https://github.com/${GITHUB_REPOSITORY}.git into ${DEPLOY_PATH}..."
-              git clone "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "${DEPLOY_PATH}"
-              git -C "${DEPLOY_PATH}" remote set-url origin "https://github.com/${GITHUB_REPOSITORY}.git"
+              if _ensure_deploy_path_ready "${DEPLOY_PATH}"; then
+                rm -rf "${DEPLOY_PATH}" 2>/dev/null || sudo rm -rf "${DEPLOY_PATH}" 2>/dev/null || true
+                _ensure_deploy_path_ready "${DEPLOY_PATH}"
+                _clone_repo "${DEPLOY_PATH}"
+              else
+                FALLBACK_PATH="${HOME}/madsan"
+                echo "WARN: cannot prepare ${DEPLOY_PATH} (passwordless sudo for mkdir/chown required) — cloning to ${FALLBACK_PATH}"
+                rm -rf "${FALLBACK_PATH}" 2>/dev/null || true
+                _clone_repo "${FALLBACK_PATH}"
+                if sudo ln -sfn "${FALLBACK_PATH}" "${DEPLOY_PATH}" 2>/dev/null; then
+                  echo "Symlinked ${DEPLOY_PATH} -> ${FALLBACK_PATH}"
+                else
+                  echo "WARN: could not symlink ${DEPLOY_PATH}; using ${FALLBACK_PATH} for this deploy"
+                  DEPLOY_PATH="${FALLBACK_PATH}"
+                fi
+              fi
             }
 
             _bootstrap_deploy_checkout

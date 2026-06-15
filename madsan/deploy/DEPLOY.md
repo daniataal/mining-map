@@ -129,6 +129,15 @@ Target: **linux/arm64** VM (~23 GiB RAM per prod overlay comments).
 
 Prerequisites on the VM: Docker Engine + Compose v2, `git`, `curl`; deploy user in `docker` group (or passwordless `sudo` for legacy shutdown).
 
+**One-time VM permission note:** the deploy user needs **passwordless `sudo` for `mkdir` and `chown` under `/opt`** (bootstrap only), **or** an operator must pre-create the checkout directory before the first deploy:
+
+```bash
+sudo mkdir -p /opt/madsan
+sudo chown ubuntu:ubuntu /opt/madsan   # match REMOTE_USER
+```
+
+If `sudo` is unavailable during bootstrap, the deploy script falls back to cloning into `$HOME/madsan` and symlinking `/opt/madsan` when possible; otherwise it uses `$HOME/madsan` for that run.
+
 **Manual bootstrap** (optional — same end state):
 
 ```bash
