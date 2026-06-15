@@ -95,7 +95,7 @@ jobs:
           ./scripts/render_backend_env_test.sh
 
   # Legacy mining-viz deploy job (manual workflow_dispatch only).
-  # MadSan uses MADSAN_DEPLOY_* secrets via madsan-deploy.yml — not REMOTE_* here.
+  # MadSan deploy reuses REMOTE_* via madsan-deploy.yml (see madsan/deploy/DEPLOY.md).
   # Deploy job — required GitHub secrets (repository Settings → Secrets):
   #   DOCKER_USERNAME, DOCKER_PASSWORD — registry push (build job)
   #   REMOTE_HOST, REMOTE_USER, REMOTE_SSH_KEY — SSH to production VM

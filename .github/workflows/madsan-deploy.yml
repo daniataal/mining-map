@@ -5,7 +5,9 @@
 # PRs never deploy. Use workflow_dispatch for manual prod deploy.
 #
 # Required GitHub secrets (repository Settings → Secrets):
-#   MADSAN_DEPLOY_HOST, MADSAN_DEPLOY_USER, MADSAN_DEPLOY_SSH_KEY
+#   REMOTE_HOST, REMOTE_USER, REMOTE_SSH_KEY — same as legacy docker-image.yml deploy
+# Optional aliases (used only when REMOTE_* is unset): MADSAN_DEPLOY_HOST, MADSAN_DEPLOY_USER, MADSAN_DEPLOY_SSH_KEY
+# Application API keys live in madsan/deploy/.env on the VM — not in GitHub.
 
 name: MadSan deploy
 
@@ -119,13 +121,14 @@ jobs:
           DEPLOY_SHA: ${{ needs.gate.outputs.deploy_sha }}
           DEPLOY_REF: ${{ needs.gate.outputs.deploy_ref }}
           MADSAN_DEPLOY_PATH: /opt/madsan
+          LEGACY_DEPLOY_PATH: /opt/mining-map
           COMPOSE_PROJECT_NAME: madsan
         with:
-          host: ${{ secrets.MADSAN_DEPLOY_HOST }}
-          username: ${{ secrets.MADSAN_DEPLOY_USER }}
-          key: ${{ secrets.MADSAN_DEPLOY_SSH_KEY }}
+          host: ${{ secrets.REMOTE_HOST || secrets.MADSAN_DEPLOY_HOST }}
+          username: ${{ secrets.REMOTE_USER || secrets.MADSAN_DEPLOY_USER }}
+          key: ${{ secrets.REMOTE_SSH_KEY || secrets.MADSAN_DEPLOY_SSH_KEY }}
           port: 22
-          envs: DEPLOY_SHA,DEPLOY_REF,MADSAN_DEPLOY_PATH,COMPOSE_PROJECT_NAME
+          envs: DEPLOY_SHA,DEPLOY_REF,MADSAN_DEPLOY_PATH,LEGACY_DEPLOY_PATH,COMPOSE_PROJECT_NAME
           script_stop: true
           script: |
             set -euo pipefail
@@ -157,6 +160,21 @@ jobs:
             if [ ! -f "${ENV_FILE}" ]; then
               echo "ERROR: missing ${ENV_FILE} — copy from .env.example on the host (first boot only)"
               exit 1
+            fi
+
+            LEGACY_PATH="${LEGACY_DEPLOY_PATH:-/opt/mining-map}"
+            LEGACY_COMPOSE="${LEGACY_PATH}/docker-compose.prod.yml"
+            if [ -f "${LEGACY_COMPOSE}" ]; then
+              echo "Stopping legacy mining-map stack at ${LEGACY_PATH} (volumes preserved)..."
+              _legacy_down() {
+                cd "${LEGACY_PATH}"
+                docker compose -f docker-compose.prod.yml down --remove-orphans
+              }
+              if ! _legacy_down 2>/dev/null; then
+                sudo bash -c "cd '${LEGACY_PATH}' && docker compose -f docker-compose.prod.yml down --remove-orphans"
+              fi
+            else
+              echo "No legacy compose at ${LEGACY_COMPOSE} — skipping legacy shutdown"
             fi
 
             COMPOSE_BASE=(docker compose -f "${COMPOSE_DIR}/docker-compose.yml" -f "${COMPOSE_DIR}/docker-compose.prod.yml")
