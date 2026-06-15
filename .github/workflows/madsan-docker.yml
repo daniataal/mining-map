@@ -1,5 +1,5 @@
 # MadSan Docker validation — compose config sanity + image build (no registry push).
-# Deploy secrets are NOT used here. Future VM deploy: see madsan/.github/workflows/deploy.example.yml
+# VM deploy after green: .github/workflows/madsan-deploy.yml
 name: MadSan Docker validate
 
 on:

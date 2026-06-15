@@ -1,0 +1,206 @@
+# MadSan VM deploy — docker compose on linux/arm64 prod host.
+# Does NOT deploy mining-viz / legacy stack (see docker-image.yml, manual only).
+#
+# Triggers after MadSan Docker validate succeeds on push to main/paperclip2.
+# PRs never deploy. Use workflow_dispatch for manual prod deploy.
+#
+# Required GitHub secrets (repository Settings → Secrets):
+#   MADSAN_DEPLOY_HOST, MADSAN_DEPLOY_USER, MADSAN_DEPLOY_SSH_KEY
+
+name: MadSan deploy
+
+on:
+  workflow_run:
+    workflows:
+      - MadSan Docker validate
+    types:
+      - completed
+    branches:
+      - main
+      - master
+      - paperclip2
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Git ref to deploy (branch, tag, or SHA)
+        required: false
+        default: main
+      skip_ci_gate:
+        description: Skip CI gate checks (emergency only)
+        type: boolean
+        required: false
+        default: false
+
+concurrency:
+  group: madsan-deploy-prod
+  cancel-in-progress: false
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  gate:
+    name: CI gate
+    runs-on: ubuntu-latest
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push'
+      )
+    outputs:
+      deploy_sha: ${{ steps.resolve.outputs.deploy_sha }}
+      deploy_ref: ${{ steps.resolve.outputs.deploy_ref }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.event.workflow_run.head_sha }}
+          fetch-depth: 2
+
+      - name: Resolve deploy SHA
+        id: resolve
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "deploy_ref=${{ inputs.ref }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "deploy_ref=${{ github.event.workflow_run.head_branch }}" >> "$GITHUB_OUTPUT"
+          fi
+          echo "deploy_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Require MadSan path changes (auto deploy only)
+        if: github.event_name == 'workflow_run'
+        run: |
+          if ! git diff --name-only HEAD^ HEAD | grep -qE '^(madsan/|\.github/workflows/madsan-)'; then
+            echo "No madsan/** changes in this push — skipping deploy."
+            exit 1
+          fi
+
+      - name: Verify backend and frontend CI (if they ran)
+        if: github.event_name != 'workflow_dispatch' || inputs.skip_ci_gate != true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEPLOY_SHA: ${{ steps.resolve.outputs.deploy_sha }}
+        run: |
+          set -euo pipefail
+          for wf in "MadSan backend" "MadSan frontend"; do
+            row="$(gh run list \
+              --workflow="$wf" \
+              --commit="$DEPLOY_SHA" \
+              --limit 1 \
+              --json databaseId,conclusion,status 2>/dev/null || echo '[]')"
+            count="$(echo "$row" | jq 'length')"
+            if [ "$count" -eq 0 ]; then
+              echo "$wf: no run for $DEPLOY_SHA (path filter skipped) — OK"
+              continue
+            fi
+            conclusion="$(echo "$row" | jq -r '.[0].conclusion // empty')"
+            status="$(echo "$row" | jq -r '.[0].status // empty')"
+            if [ "$status" != "completed" ] || [ "$conclusion" != "success" ]; then
+              echo "$wf: status=$status conclusion=$conclusion — blocking deploy"
+              exit 1
+            fi
+            echo "$wf: success"
+          done
+
+  deploy:
+    name: Deploy to VM
+    needs: gate
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.gate.outputs.deploy_sha }}
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          DEPLOY_SHA: ${{ needs.gate.outputs.deploy_sha }}
+          DEPLOY_REF: ${{ needs.gate.outputs.deploy_ref }}
+          MADSAN_DEPLOY_PATH: /opt/madsan
+          COMPOSE_PROJECT_NAME: madsan
+        with:
+          host: ${{ secrets.MADSAN_DEPLOY_HOST }}
+          username: ${{ secrets.MADSAN_DEPLOY_USER }}
+          key: ${{ secrets.MADSAN_DEPLOY_SSH_KEY }}
+          port: 22
+          envs: DEPLOY_SHA,DEPLOY_REF,MADSAN_DEPLOY_PATH,COMPOSE_PROJECT_NAME
+          script_stop: true
+          script: |
+            set -euo pipefail
+
+            DEPLOY_PATH="${MADSAN_DEPLOY_PATH:-/opt/madsan}"
+            export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-madsan}"
+
+            if [ ! -d "${DEPLOY_PATH}/.git" ]; then
+              echo "ERROR: ${DEPLOY_PATH} is not a git checkout. Bootstrap per madsan/deploy/DEPLOY.md"
+              exit 1
+            fi
+
+            cd "${DEPLOY_PATH}"
+            git fetch --tags origin
+            git checkout "${DEPLOY_SHA}"
+
+            if [ -f madsan/deploy/docker-compose.yml ]; then
+              COMPOSE_DIR="madsan/deploy"
+              REPO_ROOT="${DEPLOY_PATH}"
+            elif [ -f deploy/docker-compose.yml ]; then
+              COMPOSE_DIR="deploy"
+              REPO_ROOT="${DEPLOY_PATH}"
+            else
+              echo "ERROR: cannot find docker-compose.yml under ${DEPLOY_PATH}"
+              exit 1
+            fi
+
+            ENV_FILE="${REPO_ROOT}/${COMPOSE_DIR}/.env"
+            if [ ! -f "${ENV_FILE}" ]; then
+              echo "ERROR: missing ${ENV_FILE} — copy from .env.example on the host (first boot only)"
+              exit 1
+            fi
+
+            COMPOSE_BASE=(docker compose -f "${COMPOSE_DIR}/docker-compose.yml" -f "${COMPOSE_DIR}/docker-compose.prod.yml")
+            PROFILES=(--profile proxy)
+            if grep -Eq '^AISSTREAM_API_KEY=.+$' "${ENV_FILE}"; then
+              PROFILES+=(--profile ais)
+              echo "AISSTREAM_API_KEY set — enabling ais profile"
+            else
+              echo "AISSTREAM_API_KEY unset — skipping ais profile"
+            fi
+
+            echo "Deploying ${DEPLOY_SHA} (${DEPLOY_REF}) from ${DEPLOY_PATH}"
+            "${COMPOSE_BASE[@]}" "${PROFILES[@]}" build --pull
+            "${COMPOSE_BASE[@]}" "${PROFILES[@]}" up -d --remove-orphans
+
+            echo "Waiting for API health via Caddy..."
+            READY=false
+            for i in $(seq 1 90); do
+              if curl -fsS --connect-timeout 2 --max-time 10 http://127.0.0.1/health >/dev/null 2>&1; then
+                READY=true
+                break
+              fi
+              sleep 2
+            done
+
+            if [ "${READY}" != "true" ]; then
+              echo "ERROR: health check failed after deploy"
+              "${COMPOSE_BASE[@]}" ps
+              exit 1
+            fi
+            echo "Health check passed: http://127.0.0.1/health"
+
+            echo "Scoped image cleanup (project=${COMPOSE_PROJECT_NAME})..."
+            docker image prune -f
+
+            mapfile -t PROJECT_IMAGES < <(docker images -q --filter "label=com.docker.compose.project=${COMPOSE_PROJECT_NAME}" 2>/dev/null | sort -u || true)
+            for img_id in "${PROJECT_IMAGES[@]:-}"; do
+              [ -z "${img_id}" ] && continue
+              if [ -z "$(docker ps -aq --filter "ancestor=${img_id}" 2>/dev/null)" ]; then
+                docker rmi "${img_id}" 2>/dev/null || true
+              fi
+            done
+
+            docker builder prune -f --filter "until=48h" 2>/dev/null || true
+
+            echo "Deploy complete."
+            "${COMPOSE_BASE[@]}" ps
