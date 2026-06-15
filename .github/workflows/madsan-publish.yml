@@ -1,0 +1,129 @@
+# MadSan Docker Hub publish — builds linux/arm64 images after Docker validate CI.
+# Registry: dannyatalla/madsan-api, dannyatalla/madsan-frontend (tags: latest, v<run>, <short_sha>).
+# VM deploy: .github/workflows/madsan-deploy.yml (pull via IMAGE_TAG after this workflow).
+name: MadSan Docker publish
+
+on:
+  workflow_run:
+    workflows:
+      - MadSan Docker validate
+    types:
+      - completed
+    branches:
+      - main
+      - master
+      - paperclip2
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Git ref to publish (branch, tag, or SHA)
+        required: false
+        default: main
+      image_tag:
+        description: Extra registry tag (also pushes latest and short SHA)
+        required: false
+        default: ""
+
+concurrency:
+  group: madsan-publish-${{ github.event.workflow_run.head_branch || github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: CI gate
+    runs-on: ubuntu-latest
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push'
+      )
+    outputs:
+      publish_sha: ${{ steps.resolve.outputs.publish_sha }}
+      publish_ref: ${{ steps.resolve.outputs.publish_ref }}
+      image_tag: ${{ steps.resolve.outputs.image_tag }}
+      short_sha: ${{ steps.resolve.outputs.short_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.event.workflow_run.head_sha }}
+          fetch-depth: 2
+
+      - name: Resolve publish ref and tags
+        id: resolve
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "publish_ref=${{ inputs.ref }}" >> "$GITHUB_OUTPUT"
+            if [ -n "${{ inputs.image_tag }}" ]; then
+              echo "image_tag=${{ inputs.image_tag }}" >> "$GITHUB_OUTPUT"
+            else
+              echo "image_tag=v${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "publish_ref=${{ github.event.workflow_run.head_branch }}" >> "$GITHUB_OUTPUT"
+            echo "image_tag=v${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+          fi
+          echo "publish_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "short_sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Require MadSan path changes (auto publish only)
+        if: github.event_name == 'workflow_run'
+        run: |
+          if ! git diff --name-only HEAD^ HEAD | grep -qE '^(madsan/|\.github/workflows/madsan-)'; then
+            echo "No madsan/** changes in this push — skipping publish."
+            exit 1
+          fi
+
+  publish:
+    name: Build and push images
+    needs: gate
+    runs-on: ubuntu-24.04-arm
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.gate.outputs.publish_sha }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and push API image
+        uses: docker/build-push-action@v5
+        with:
+          context: madsan/backend
+          file: madsan/deploy/Dockerfile.api
+          platforms: linux/arm64
+          push: true
+          tags: |
+            dannyatalla/madsan-api:latest
+            dannyatalla/madsan-api:${{ needs.gate.outputs.image_tag }}
+            dannyatalla/madsan-api:${{ needs.gate.outputs.short_sha }}
+          cache-from: |
+            type=gha,scope=madsan-api
+            type=registry,ref=dannyatalla/madsan-api:latest
+          cache-to: type=gha,mode=max,scope=madsan-api
+
+      - name: Build and push frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: madsan/frontend
+          file: madsan/deploy/Dockerfile.frontend
+          platforms: linux/arm64
+          push: true
+          tags: |
+            dannyatalla/madsan-frontend:latest
+            dannyatalla/madsan-frontend:${{ needs.gate.outputs.image_tag }}
+            dannyatalla/madsan-frontend:${{ needs.gate.outputs.short_sha }}
+          build-args: NEXT_PUBLIC_API_URL=${{ vars.MADSAN_NEXT_PUBLIC_API_URL || 'http://localhost' }}
+          cache-from: |
+            type=gha,scope=madsan-frontend
+            type=registry,ref=dannyatalla/madsan-frontend:latest
+          cache-to: type=gha,mode=max,scope=madsan-frontend

@@ -1,12 +1,14 @@
 # MadSan VM deploy — docker compose on linux/arm64 prod host.
 # Does NOT deploy mining-viz / legacy stack (see docker-image.yml, manual only).
 #
-# Triggers after MadSan Docker validate succeeds on push to main/paperclip2.
+# Triggers after MadSan Docker publish succeeds on push to main/paperclip2.
 # PRs never deploy. Use workflow_dispatch for manual prod deploy.
 #
 # Required GitHub secrets (repository Settings → Secrets):
+#   DOCKER_USERNAME, DOCKER_PASSWORD — registry push (madsan-publish.yml)
 #   REMOTE_HOST, REMOTE_USER, REMOTE_SSH_KEY — same as legacy docker-image.yml deploy
 # Optional aliases (used only when REMOTE_* is unset): MADSAN_DEPLOY_HOST, MADSAN_DEPLOY_USER, MADSAN_DEPLOY_SSH_KEY
+# Optional repo variable: MADSAN_NEXT_PUBLIC_API_URL — baked into frontend at publish (match deploy/.env on VM)
 # Application API keys live in madsan/deploy/.env on the VM — not in GitHub.
 
 name: MadSan deploy
@@ -14,7 +16,7 @@ name: MadSan deploy
 on:
   workflow_run:
     workflows:
-      - MadSan Docker validate
+      - MadSan Docker publish
     types:
       - completed
     branches:
@@ -27,6 +29,10 @@ on:
         description: Git ref to deploy (branch, tag, or SHA)
         required: false
         default: main
+      image_tag:
+        description: Registry tag to pull (default latest)
+        required: false
+        default: latest
       skip_ci_gate:
         description: Skip CI gate checks (emergency only)
         type: boolean
@@ -49,24 +55,30 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       (
         github.event.workflow_run.conclusion == 'success' &&
-        github.event.workflow_run.event == 'push'
+        (
+          github.event.workflow_run.event == 'push' ||
+          github.event.workflow_run.event == 'workflow_run'
+        )
       )
     outputs:
       deploy_sha: ${{ steps.resolve.outputs.deploy_sha }}
       deploy_ref: ${{ steps.resolve.outputs.deploy_ref }}
+      image_tag: ${{ steps.resolve.outputs.image_tag }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.event.workflow_run.head_sha }}
           fetch-depth: 2
 
-      - name: Resolve deploy SHA
+      - name: Resolve deploy SHA and image tag
         id: resolve
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "deploy_ref=${{ inputs.ref }}" >> "$GITHUB_OUTPUT"
+            echo "image_tag=${{ inputs.image_tag }}" >> "$GITHUB_OUTPUT"
           else
             echo "deploy_ref=${{ github.event.workflow_run.head_branch }}" >> "$GITHUB_OUTPUT"
+            echo "image_tag=v${{ github.event.workflow_run.run_number }}" >> "$GITHUB_OUTPUT"
           fi
           echo "deploy_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
@@ -120,6 +132,7 @@ jobs:
         env:
           DEPLOY_SHA: ${{ needs.gate.outputs.deploy_sha }}
           DEPLOY_REF: ${{ needs.gate.outputs.deploy_ref }}
+          IMAGE_TAG: ${{ needs.gate.outputs.image_tag }}
           MADSAN_DEPLOY_PATH: /opt/madsan
           LEGACY_DEPLOY_PATH: /opt/mining-map
           COMPOSE_PROJECT_NAME: madsan
@@ -128,7 +141,7 @@ jobs:
           username: ${{ secrets.REMOTE_USER || secrets.MADSAN_DEPLOY_USER }}
           key: ${{ secrets.REMOTE_SSH_KEY || secrets.MADSAN_DEPLOY_SSH_KEY }}
           port: 22
-          envs: DEPLOY_SHA,DEPLOY_REF,MADSAN_DEPLOY_PATH,LEGACY_DEPLOY_PATH,COMPOSE_PROJECT_NAME
+          envs: DEPLOY_SHA,DEPLOY_REF,IMAGE_TAG,MADSAN_DEPLOY_PATH,LEGACY_DEPLOY_PATH,COMPOSE_PROJECT_NAME
           script_stop: true
           script: |
             set -euo pipefail
@@ -186,8 +199,23 @@ jobs:
               echo "AISSTREAM_API_KEY unset — skipping ais profile"
             fi
 
-            echo "Deploying ${DEPLOY_SHA} (${DEPLOY_REF}) from ${DEPLOY_PATH}"
-            "${COMPOSE_BASE[@]}" "${PROFILES[@]}" build --pull
+            echo "Deploying ${DEPLOY_SHA} (${DEPLOY_REF}) IMAGE_TAG=${IMAGE_TAG} from ${DEPLOY_PATH}"
+            export IMAGE_TAG="${IMAGE_TAG:-latest}"
+
+            PULL_SERVICES=(madsan-api madsan-worker madsan-scheduler madsan-frontend)
+            if grep -Eq '^AISSTREAM_API_KEY=.+$' "${ENV_FILE}"; then
+              PULL_SERVICES+=(madsan-ais-ingest)
+            fi
+
+            PULL_OK=true
+            if ! "${COMPOSE_BASE[@]}" "${PROFILES[@]}" pull "${PULL_SERVICES[@]}"; then
+              echo "Registry pull failed — falling back to on-VM build"
+              PULL_OK=false
+            fi
+
+            if [ "${PULL_OK}" = "false" ]; then
+              "${COMPOSE_BASE[@]}" "${PROFILES[@]}" build --pull
+            fi
             "${COMPOSE_BASE[@]}" "${PROFILES[@]}" up -d --remove-orphans
 
             echo "Waiting for API health via Caddy..."

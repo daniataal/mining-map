@@ -1,5 +1,6 @@
 # MadSan Docker validation — compose config sanity + image build (no registry push).
-# VM deploy after green: .github/workflows/madsan-deploy.yml
+# VM deploy after publish: .github/workflows/madsan-deploy.yml
+# Registry push (main only): .github/workflows/madsan-publish.yml
 name: MadSan Docker validate
 
 on:
