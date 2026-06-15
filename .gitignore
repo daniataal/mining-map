@@ -30,3 +30,11 @@ data/gem/goit-pipeline-routes/
 .vscode/
 # Local graphify knowledge graph (regenerate: graphify update .)
 graphify-out/
+
+# MadSan local GEM/JODI bulk data — keep on disk; do not commit (see README in each folder)
+madsan/data/gem/**
+!madsan/data/gem/README.md
+!madsan/data/gem/.gitkeep
+madsan/data/jodi/**
+!madsan/data/jodi/README.md
+!madsan/data/jodi/.gitkeep
