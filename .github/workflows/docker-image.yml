@@ -1,10 +1,19 @@
-# DEPRECATED for auto CI — mining-viz frontend + legacy Python backend deploy.
-# MadSan VM deploy: .github/workflows/madsan-deploy.yml (main/paperclip2 after CI).
-# This workflow is manual-only (workflow_dispatch). Do not re-enable push triggers.
-name: Docker Image CI and Remote Deployment (legacy mining-viz, manual)
+name: Docker Image CI and Remote Deployment
 
 on:
   workflow_dispatch:
+  push:
+    branches: [ "main" ]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - ".paperclip/**"
+  pull_request:
+    branches: [ "main" ]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - ".paperclip/**"
 
 jobs:
   meta:

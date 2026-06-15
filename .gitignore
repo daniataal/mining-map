@@ -25,36 +25,8 @@ data/eia_downloads/*.xlsx
 # GEM GOIT pipeline route GeoJSON (fetch via scripts/fetch_gem_goit_pipeline_routes.sh)
 data/gem/goit-pipeline-routes/
 !data/eia_downloads/.gitkeep
-
-# MadSan raw intelligence drops are huge and must stay local/object-storage only.
-# Track only lightweight documentation and manifests.
-madsan/data/gem/**
-!madsan/data/gem/
-!madsan/data/gem/.gitkeep
-!madsan/data/gem/README.md
-!madsan/data/gem/manifest*.json
-!madsan/data/gem/manifest*.csv
-madsan/data/jodi/**
-!madsan/data/jodi/
-!madsan/data/jodi/.gitkeep
-!madsan/data/jodi/README.md
-!madsan/data/jodi/manifest*.json
-!madsan/data/jodi/manifest*.csv
 .DS_Store
 .idea/
 .vscode/
 # Local graphify knowledge graph (regenerate: graphify update .)
 graphify-out/
-
-# Local database/backups - never commit
-backups/
-*.dump
-*.sql.gz
-*.bak
-*.backup
-*.tar
-*.tar.gz
-*.zip
-
-# Build artifacts
-*.tsbuildinfo
