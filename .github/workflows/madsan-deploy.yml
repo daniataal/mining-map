@@ -298,10 +298,13 @@ jobs:
 
             _bootstrap_deploy_checkout
 
-            _step "checkout deploy SHA"
+            _step "checkout origin/main for compose files"
             cd "${DEPLOY_PATH}"
             git fetch --tags origin
-            git checkout "${DEPLOY_SHA}"
+            # Compose/Caddy/deploy scripts come from main — not DEPLOY_SHA. App code ships in
+            # registry images (IMAGE_TAG from publish); pinning git to publish SHA leaves the VM
+            # on an old deploy script when fixes land on main after the publish run.
+            git checkout origin/main
 
             if [ -f madsan/scripts/seed_prod_volumes.sh ]; then
               chmod +x madsan/scripts/seed_prod_volumes.sh
@@ -383,7 +386,7 @@ jobs:
             fi
 
             _step "compose pull or build"
-            echo "Deploying ${DEPLOY_SHA} (${DEPLOY_REF}) IMAGE_TAG=${IMAGE_TAG} from ${DEPLOY_PATH}"
+            echo "Deploying app IMAGE_TAG=${IMAGE_TAG} from git $(git rev-parse --short HEAD)"
             export IMAGE_TAG="${IMAGE_TAG:-latest}"
 
             PULL_SERVICES=(madsan-api madsan-worker madsan-scheduler madsan-frontend)

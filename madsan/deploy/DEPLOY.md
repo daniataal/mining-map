@@ -122,7 +122,7 @@ Target: **linux/arm64** VM (~23 GiB RAM per prod overlay comments).
 1. `mkdir -p /opt/madsan` (with `sudo` + `chown` if needed)
 2. If `/opt/mining-map` is already a git checkout and `/opt/madsan` is empty, symlink `/opt/madsan` → `/opt/mining-map`
 3. Otherwise `git clone` the monorepo via `GITHUB_TOKEN` (workflow `contents: read`; no deploy key required for Actions-driven clone)
-4. `git fetch` + `git checkout` deploy SHA
+4. `git fetch` + `git checkout origin/main` (compose/deploy files; app images come from registry `IMAGE_TAG`)
 5. Copy `madsan/deploy/.env.example` → `madsan/deploy/.env` **only when `.env` is missing** (never overwrites an existing file)
 6. Run `madsan/scripts/seed_prod_volumes.sh` only when `madsan_raw_data` / `madsan_etl_data` volumes are empty
 7. Stop legacy stack at `/opt/mining-map`, then `docker compose pull` / `up`
@@ -191,7 +191,7 @@ Install backup cron (optional): `madsan/scripts/install_backup_cron.sh`
 Deploy steps on the VM:
 
 1. **Stop legacy mining-map stack** at `/opt/mining-map` (`docker compose -f docker-compose.prod.yml down --remove-orphans`; volumes preserved). Tries deploy user, then `sudo docker compose`, then `sudo docker-compose`. **Non-fatal** — warns and continues if shutdown fails (permissions, stack not running, or compose missing).
-2. `git fetch` + `git checkout` deploy SHA
+2. `git fetch` + `git checkout origin/main` (compose/deploy scripts; not the publish SHA)
 3. `export IMAGE_TAG=v<publish-run>` (or `latest` / short SHA via manual dispatch)
 4. `docker compose … pull` for `madsan-api`, `madsan-worker`, `madsan-scheduler`, `madsan-frontend` (and `madsan-ais-ingest` when `AISSTREAM_API_KEY` is set). Worker/scheduler/ais share the **same** `dannyatalla/madsan-api` image tag.
 5. On pull failure, fallback: `docker compose … build --pull`
@@ -223,6 +223,16 @@ Set `COMPOSE_PROJECT_NAME=madsan` so labels stay consistent.
 | Manual VM deploy / legacy CI (removed) | Workflow `madsan-deploy.yml` (auto after CI on `main`/`paperclip2`, or `workflow_dispatch`) |
 | Registry images `dannyatalla/mining-*` | Registry images `dannyatalla/madsan-api`, `dannyatalla/madsan-frontend` (pull on VM; fallback build) |
 | GitHub injects API keys at deploy | API keys in `madsan/deploy/.env` only |
+
+## Troubleshooting
+
+| Symptom | Likely cause | What to do |
+|---------|--------------|------------|
+| `docker ps` empty on the VM | Deploy never finished (failed at prepare env, checkout, pull, or health) | Check **MadSan deploy** workflow logs on GitHub Actions; re-run **MadSan deploy** with `workflow_dispatch`, ref **`main`**, and the intended `IMAGE_TAG` (e.g. `latest` or `v<N>` from publish) |
+| Deploy fails at **prepare deploy env** | Missing or unreadable `madsan/deploy/.env`, or stale deploy script from an old git checkout | Confirm `/opt/madsan/madsan/deploy/.env` exists and is readable; fill in real secrets (not `.env.example` placeholders). Ensure VM checkout is on `origin/main` so compose scripts match current main |
+| `.env` exists but stack still unhealthy | Placeholder values from `.env.example` (`MADSAN_DB_PASSWORD`, `MADSAN_JWT_SECRET`, etc.) | Edit `.env` on the host with production secrets; redeploy |
+
+Auto-deploy after publish pins **registry** tags (`IMAGE_TAG=v<N>`) but checks out **`origin/main`** for compose files — not the publish commit SHA. If a deploy ran before a workflow fix landed, re-run deploy manually with ref **`main`**.
 
 ## Routine deploy (manual)
 
