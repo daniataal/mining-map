@@ -122,12 +122,11 @@ discover_remote_db_container() {
 
 stop_vm_writers() {
   if [[ "$DRY_RUN" == "1" ]]; then
-    echo "[dry-run] stop VM api/worker/scheduler/ais-ingest writers"
+    echo "[dry-run] stop VM api/worker/scheduler/ais-ingest/frontend/caddy (keep DB)"
     return 0
   fi
-  ssh_vm "docker stop \
-    madsan-madsan-api-1 madsan-madsan-worker-1 madsan-madsan-scheduler-1 \
-    madsan-madsan-ais-ingest-1 2>/dev/null || true"
+  ssh_vm "cd '$VM_PATH' && ./madsan/scripts/compose_prod.sh --profile proxy stop \
+    madsan-api madsan-worker madsan-scheduler madsan-ais-ingest madsan-frontend caddy 2>/dev/null || true"
 }
 
 # docker exec fails while container status is Restarting — wait or fail clearly.
@@ -415,13 +414,53 @@ count_key_tables() {
   docker exec "$REMOTE_DB_CONTAINER" psql -U postgres -d "$DB_NAME" -t -A -c "$KEY_COUNTS_SQL" 2>/dev/null || true
 }
 
+wait_for_db_stable() {
+  local i
+  for i in $(seq 1 45); do
+    if docker exec "$REMOTE_DB_CONTAINER" pg_isready -U postgres -d postgres >/dev/null 2>&1; then
+      return 0
+    fi
+    echo "  waiting for Postgres stable... attempt $i/45"
+    sleep 2
+  done
+  echo "ERROR: Postgres not ready after 90s" >&2
+  return 1
+}
+
+drop_recreate_db() {
+  docker exec "$REMOTE_DB_CONTAINER" psql -U postgres -d postgres -v ON_ERROR_STOP=1 -c \
+    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${DB_NAME}' AND pid <> pg_backend_pid();" \
+    >/dev/null 2>&1 || true
+  docker exec "$REMOTE_DB_CONTAINER" psql -U postgres -d postgres -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS \"${DB_NAME}\";"
+  docker exec "$REMOTE_DB_CONTAINER" psql -U postgres -d postgres -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"${DB_NAME}\";"
+}
+
 restore_table_data() {
   local table="$1"
   echo "  data-only retry: $table"
   set +e
-  cat "$REMOTE_DUMP" | docker exec -i "$REMOTE_DB_CONTAINER" pg_restore -U postgres -d "$DB_NAME" \
-    --no-owner --no-acl --disable-triggers --data-only --table="$table" -j 1 >/dev/null 2>&1
+  docker exec "$REMOTE_DB_CONTAINER" pg_restore -U postgres -d "$DB_NAME" \
+    --no-owner --no-acl --role=postgres --data-only --table="$table" -j 1 \
+    /tmp/madsan_restore.dump >/dev/null 2>&1
   set -e
+}
+
+run_pg_restore() {
+  local log="/tmp/pg_restore_${DB_NAME}.log"
+  docker cp "$REMOTE_DUMP" "${REMOTE_DB_CONTAINER}:/tmp/madsan_restore.dump"
+  set +e
+  docker exec "$REMOTE_DB_CONTAINER" pg_restore -U postgres -d "$DB_NAME" \
+    --no-owner --no-acl --role=postgres -j 1 /tmp/madsan_restore.dump >"$log" 2>&1
+  local st=$?
+  set -e
+  tail -15 "$log" 2>/dev/null || true
+  if [[ "$st" -gt 1 ]] && grep -qE 'no connection to the server|server closed the connection|could not connect' "$log"; then
+    return 2
+  fi
+  if [[ "$st" -gt 1 ]]; then
+    return 1
+  fi
+  return 0
 }
 
 if [[ "$DRY" == "1" ]]; then
@@ -441,23 +480,35 @@ if [[ ! -f "$REMOTE_DUMP" ]]; then
 fi
 echo "Restore source: $REMOTE_DUMP ($(du -h "$REMOTE_DUMP" | cut -f1))"
 
-docker exec "$CID" psql -U postgres -d postgres -v ON_ERROR_STOP=1 -c \
-  "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${DB_NAME}' AND pid <> pg_backend_pid();" \
-  >/dev/null 2>&1 || true
-docker exec "$CID" psql -U postgres -d postgres -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS \"${DB_NAME}\";"
-docker exec "$CID" psql -U postgres -d postgres -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"${DB_NAME}\";"
+wait_for_db_stable
 
-echo "pg_restore (streaming, --disable-triggers, may take 5–15 min)..."
-set +e
-cat "$REMOTE_DUMP" | docker exec -i "$CID" pg_restore -U postgres -d "$DB_NAME" \
-  --no-owner --no-acl --disable-triggers -j 1
-st=$?
-set -e
-if [[ "$st" -gt 1 ]]; then
-  echo "ERROR: pg_restore exit $st" >&2
+drop_recreate_db
+
+echo "pg_restore (-j 1, file inside container, may take 10–20 min)..."
+restore_ok=0
+for attempt in 1 2 3; do
+  echo "  restore attempt $attempt/3..."
+  set +e
+  run_pg_restore
+  rc=$?
+  set -e
+  if [[ "$rc" -eq 0 ]]; then
+    restore_ok=1
+    break
+  fi
+  if [[ "$rc" -eq 2 ]]; then
+    echo "WARN: connection lost during restore — waiting for DB and retrying clean restore..."
+    wait_for_db_stable || exit 1
+    drop_recreate_db
+    continue
+  fi
+  echo "ERROR: pg_restore failed (exit $rc)" >&2
+  exit 1
+done
+if [[ "$restore_ok" != "1" ]]; then
+  echo "ERROR: pg_restore failed after 3 attempts" >&2
   exit 1
 fi
-[[ "$st" -eq 1 ]] && echo "NOTE: pg_restore warnings (exit 1) — checking counts"
 
 # Retry data-only for key tables still empty after interrupted restore.
 for table in vessels market_pressure_scores opportunity_candidates; do
@@ -466,6 +517,7 @@ for table in vessels market_pressure_scores opportunity_candidates; do
     restore_table_data "$table"
   fi
 done
+docker exec "$CID" rm -f /tmp/madsan_restore.dump
 
 echo "Post-restore schema fix (migration runner + PKs from dump)..."
 docker exec "$CID" psql -U postgres -d "$DB_NAME" -v ON_ERROR_STOP=1 \
@@ -511,8 +563,11 @@ verify_vm() {
   ssh_vm "curl -fsS http://127.0.0.1/health && echo"
   print_key_table_counts "VM key tables (after)" \
     ssh_vm "docker exec $REMOTE_DB_CONTAINER psql -U postgres -d $DB_NAME -t -A -c \"$KEY_TABLE_COUNTS_SQL\""
+  ssh_vm "curl -fsS 'http://127.0.0.1/api/energy/assets?limit=1' | head -c 200 && echo" \
+    || echo "WARN: assets API sample failed"
   echo "Public checks:"
   echo "  curl -fsS http://${VM_HOST}/health"
+  echo "  curl -fsS 'http://${VM_HOST}/api/energy/assets?limit=1'"
 }
 
 main() {

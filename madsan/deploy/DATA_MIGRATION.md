@@ -86,12 +86,13 @@ set -euo pipefail
 DUMP=/opt/madsan/madsan/.migration-staging/madsan_local.dump
 CID=madsan-madsan-db-1
 
-docker stop madsan-madsan-api-1 madsan-madsan-worker-1 madsan-madsan-scheduler-1 2>/dev/null || true
+docker stop madsan-madsan-api-1 madsan-madsan-worker-1 madsan-madsan-scheduler-1 \
+  madsan-madsan-ais-ingest-1 madsan-madsan-frontend-1 madsan-caddy-1 2>/dev/null || true
 docker cp "$DUMP" "$CID:/tmp/restore.dump"
 docker exec "$CID" psql -U postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'madsan_db' AND pid <> pg_backend_pid();" || true
 docker exec "$CID" psql -U postgres -c 'DROP DATABASE IF EXISTS madsan_db;'
 docker exec "$CID" psql -U postgres -c 'CREATE DATABASE madsan_db;'
-docker exec "$CID" pg_restore -U postgres -d madsan_db --no-owner --no-acl /tmp/restore.dump || true
+docker exec "$CID" pg_restore -U postgres -d madsan_db --no-owner --no-acl --role=postgres -j 1 /tmp/restore.dump || true
 docker exec "$CID" rm -f /tmp/restore.dump
 
 cd /opt/madsan
@@ -113,7 +114,54 @@ curl -fsS http://129.159.141.101/health
 # Optional: MADSAN_API_URL=http://129.159.141.101 k6 run madsan/deploy/k6-smoke.js
 ```
 
-Expected after full local migration (approximate): `market_pressure_scores` ~350k, `vessels` ~11k, `assets` ~296k.
+Expected after full local migration (approximate): `market_pressure_scores` ~350k, `vessels` ~11k, `assets` ~296k, `companies` ~57k, `ais_positions` ~136k, `opportunity_candidates` ~5k.
+
+## Troubleshooting
+
+### `FATAL: role "madsan" does not exist`
+
+MadSan Postgres uses **`postgres`** as the superuser (`POSTGRES_USER` in compose; `DATABASE_URL` uses `postgresql://postgres:…`). There is no `MADSAN_DB_USER` and no login role named `madsan` (only `madsan_rls` for RLS policies).
+
+On the VM:
+
+```bash
+docker exec madsan-madsan-db-1 psql -U postgres -d madsan_db -c "SELECT COUNT(*) FROM assets;"
+```
+
+Do **not** use `-U madsan`.
+
+### VM counts much lower than local
+
+Common causes:
+
+1. **Never ran `migrate_data_to_vm.sh` with `CONFIRM_PROD_RESTORE=1`** — prod still has empty/fresh `madsan_db` from first deploy.
+2. **Wrong compose stack** — repo-root legacy compose (`cd /opt/madsan && docker compose up`) creates a different project/volume than MadSan prod (`./madsan/scripts/compose_prod.sh --profile proxy up -d`). Always use `compose_prod.sh` on the VM.
+3. **Partial or failed restore** — interrupted `pg_restore`, parallel jobs (`-j` > 1) under memory pressure, or streaming restore over SSH can cause Postgres OOM/restart (`no connection to the server` × hundreds). Stop api/worker/scheduler/frontend/caddy first; use `pg_restore -j 1 --role=postgres` from a file copied into the container (not stdin). Re-run migration; the script recreates the volume when corruption is detected and `CONFIRM_PROD_RESTORE=1`.
+4. **`docker compose down -v` on prod** — **never** do this; it wipes `madsan_postgres_data`. If it happened, restore from local dump via this script (there is nothing useful left on the volume).
+5. **Local DB grew since last dump** — re-run full migration (not `--files-only`) to refresh the dump.
+
+Check before/after counts:
+
+```bash
+# Local
+docker exec deploy-madsan-db-1 psql -U postgres -d madsan_db -t -A -c "
+  SELECT 'assets', COUNT(*) FROM assets
+  UNION ALL SELECT 'market_pressure_scores', COUNT(*) FROM market_pressure_scores;"
+
+# VM
+ssh -i $KEY ubuntu@129.159.141.101 \
+  'docker exec madsan-madsan-db-1 psql -U postgres -d madsan_db -t -A -c "
+    SELECT '\''assets'\'', COUNT(*) FROM assets
+    UNION ALL SELECT '\''market_pressure_scores'\'', COUNT(*) FROM market_pressure_scores;"'
+```
+
+If `madsan-madsan-db-1` is in a **Restarting** loop, inspect `docker logs madsan-madsan-db-1` and re-run:
+
+```bash
+CONFIRM_PROD_RESTORE=1 SKIP_VM_BACKUP=1 ./madsan/scripts/migrate_data_to_vm.sh
+```
+
+(`SKIP_VM_BACKUP=1` when the corrupt DB cannot be dumped.)
 
 ## Rollback
 
