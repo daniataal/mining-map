@@ -136,23 +136,83 @@ jobs:
           MADSAN_DEPLOY_PATH: /opt/madsan
           LEGACY_DEPLOY_PATH: /opt/mining-map
           COMPOSE_PROJECT_NAME: madsan
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ github.token }}
         with:
           host: ${{ secrets.REMOTE_HOST || secrets.MADSAN_DEPLOY_HOST }}
           username: ${{ secrets.REMOTE_USER || secrets.MADSAN_DEPLOY_USER }}
           key: ${{ secrets.REMOTE_SSH_KEY || secrets.MADSAN_DEPLOY_SSH_KEY }}
           port: 22
-          envs: DEPLOY_SHA,DEPLOY_REF,IMAGE_TAG,MADSAN_DEPLOY_PATH,LEGACY_DEPLOY_PATH,COMPOSE_PROJECT_NAME
+          envs: DEPLOY_SHA,DEPLOY_REF,IMAGE_TAG,MADSAN_DEPLOY_PATH,LEGACY_DEPLOY_PATH,COMPOSE_PROJECT_NAME,GITHUB_REPOSITORY,GITHUB_TOKEN
           script_stop: true
           script: |
             set -euo pipefail
 
             DEPLOY_PATH="${MADSAN_DEPLOY_PATH:-/opt/madsan}"
+            LEGACY_PATH="${LEGACY_DEPLOY_PATH:-/opt/mining-map}"
             export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-madsan}"
 
-            if [ ! -d "${DEPLOY_PATH}/.git" ]; then
-              echo "ERROR: ${DEPLOY_PATH} is not a git checkout. Bootstrap per madsan/deploy/DEPLOY.md"
-              exit 1
-            fi
+            _ensure_deploy_path_writable() {
+              local path="$1"
+              if [ -d "${path}" ]; then
+                return 0
+              fi
+              mkdir -p "${path}" 2>/dev/null || sudo mkdir -p "${path}"
+              if [ ! -w "${path}" ]; then
+                sudo chown "$(whoami):$(whoami)" "${path}" 2>/dev/null || true
+              fi
+            }
+
+            _volume_is_empty() {
+              local vol="$1"
+              if ! docker volume inspect "${vol}" >/dev/null 2>&1; then
+                return 0
+              fi
+              local count
+              count="$(docker run --rm -v "${vol}:/v" alpine sh -c 'ls -A /v 2>/dev/null | wc -l' 2>/dev/null || echo 0)"
+              [ "${count}" -eq 0 ]
+            }
+
+            _bootstrap_deploy_checkout() {
+              if [ -d "${DEPLOY_PATH}/.git" ]; then
+                return 0
+              fi
+
+              echo "Bootstrapping ${DEPLOY_PATH} (not a git checkout)..."
+
+              if [ -d "${LEGACY_PATH}/.git" ]; then
+                if [ ! -e "${DEPLOY_PATH}" ] || [ -z "$(ls -A "${DEPLOY_PATH}" 2>/dev/null || true)" ]; then
+                  rm -rf "${DEPLOY_PATH}" 2>/dev/null || sudo rm -rf "${DEPLOY_PATH}" 2>/dev/null || true
+                  ln -sfn "${LEGACY_PATH}" "${DEPLOY_PATH}"
+                  echo "Linked ${DEPLOY_PATH} -> ${LEGACY_PATH} (legacy checkout)"
+                  return 0
+                fi
+                echo "WARN: ${DEPLOY_PATH} is non-empty and not a git repo — cannot symlink legacy ${LEGACY_PATH}"
+              fi
+
+              if [ -d "${DEPLOY_PATH}" ] && [ -n "$(ls -A "${DEPLOY_PATH}" 2>/dev/null || true)" ]; then
+                echo "ERROR: ${DEPLOY_PATH} is not empty and not a git checkout — manual cleanup required"
+                exit 1
+              fi
+
+              if [ -z "${GITHUB_REPOSITORY:-}" ]; then
+                echo "ERROR: GITHUB_REPOSITORY not set — cannot clone"
+                exit 1
+              fi
+              if [ -z "${GITHUB_TOKEN:-}" ]; then
+                echo "ERROR: GITHUB_TOKEN not set — cannot clone private repo"
+                exit 1
+              fi
+
+              _ensure_deploy_path_writable "$(dirname "${DEPLOY_PATH}")"
+              rm -rf "${DEPLOY_PATH}" 2>/dev/null || sudo rm -rf "${DEPLOY_PATH}" 2>/dev/null || true
+
+              echo "Cloning https://github.com/${GITHUB_REPOSITORY}.git into ${DEPLOY_PATH}..."
+              git clone "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "${DEPLOY_PATH}"
+              git -C "${DEPLOY_PATH}" remote set-url origin "https://github.com/${GITHUB_REPOSITORY}.git"
+            }
+
+            _bootstrap_deploy_checkout
 
             cd "${DEPLOY_PATH}"
             git fetch --tags origin
@@ -161,21 +221,39 @@ jobs:
             if [ -f madsan/deploy/docker-compose.yml ]; then
               COMPOSE_DIR="madsan/deploy"
               REPO_ROOT="${DEPLOY_PATH}"
+              SEED_SCRIPT="madsan/scripts/seed_prod_volumes.sh"
             elif [ -f deploy/docker-compose.yml ]; then
               COMPOSE_DIR="deploy"
               REPO_ROOT="${DEPLOY_PATH}"
+              SEED_SCRIPT="scripts/seed_prod_volumes.sh"
             else
               echo "ERROR: cannot find docker-compose.yml under ${DEPLOY_PATH}"
               exit 1
             fi
 
             ENV_FILE="${REPO_ROOT}/${COMPOSE_DIR}/.env"
+            ENV_EXAMPLE="${REPO_ROOT}/${COMPOSE_DIR}/.env.example"
             if [ ! -f "${ENV_FILE}" ]; then
-              echo "ERROR: missing ${ENV_FILE} — copy from .env.example on the host (first boot only)"
-              exit 1
+              if [ -f "${ENV_EXAMPLE}" ]; then
+                cp "${ENV_EXAMPLE}" "${ENV_FILE}"
+                echo "Created ${ENV_FILE} from .env.example — set secrets on the host before relying on prod traffic"
+              else
+                echo "ERROR: missing ${ENV_FILE} and ${ENV_EXAMPLE}"
+                exit 1
+              fi
             fi
 
-            LEGACY_PATH="${LEGACY_DEPLOY_PATH:-/opt/mining-map}"
+            if _volume_is_empty madsan_raw_data || _volume_is_empty madsan_etl_data; then
+              if [ -x "${REPO_ROOT}/${SEED_SCRIPT}" ]; then
+                echo "Seeding empty prod volumes via ${SEED_SCRIPT}..."
+                (cd "${REPO_ROOT}" && "./${SEED_SCRIPT}")
+              else
+                echo "WARN: ${SEED_SCRIPT} missing or not executable — skipping volume seed"
+              fi
+            else
+              echo "Prod volumes already populated — skipping seed_prod_volumes.sh"
+            fi
+
             LEGACY_COMPOSE="${LEGACY_PATH}/docker-compose.prod.yml"
             if [ -f "${LEGACY_COMPOSE}" ]; then
               echo "Stopping legacy mining-map stack at ${LEGACY_PATH} (volumes preserved)..."

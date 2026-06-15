@@ -58,6 +58,20 @@ Copy from `deploy/.env.example` on the host. Never commit real values.
 
 Target: **linux/arm64** VM (~23 GiB RAM per prod overlay comments).
 
+**Automated (recommended):** run **MadSan deploy** (`workflow_dispatch` on `madsan-deploy.yml`) after setting GitHub secrets (`REMOTE_HOST`, `REMOTE_USER`, `REMOTE_SSH_KEY`). The deploy script auto-bootstraps when `/opt/madsan` is missing or not a git checkout:
+
+1. `mkdir -p /opt/madsan` (with `sudo` + `chown` if needed)
+2. If `/opt/mining-map` is already a git checkout and `/opt/madsan` is empty, symlink `/opt/madsan` → `/opt/mining-map`
+3. Otherwise `git clone` the monorepo via `GITHUB_TOKEN` (workflow `contents: read`; no deploy key required for Actions-driven clone)
+4. `git fetch` + `git checkout` deploy SHA
+5. Copy `madsan/deploy/.env.example` → `madsan/deploy/.env` **only when `.env` is missing** (never overwrites an existing file)
+6. Run `madsan/scripts/seed_prod_volumes.sh` only when `madsan_raw_data` / `madsan_etl_data` volumes are empty
+7. Stop legacy stack at `/opt/mining-map`, then `docker compose pull` / `up`
+
+Prerequisites on the VM: Docker Engine + Compose v2, `git`, `curl`; deploy user in `docker` group (or passwordless `sudo` for legacy shutdown).
+
+**Manual bootstrap** (optional — same end state):
+
 ```bash
 # 1. Docker Engine + Compose v2 plugin
 sudo apt-get update && sudo apt-get install -y docker.io docker-compose-v2 git curl
@@ -67,7 +81,7 @@ sudo usermod -aG docker "$USER"
 # 2. Checkout (monorepo interim — full mining-map repo at /opt/madsan)
 sudo mkdir -p /opt/madsan
 sudo chown "$USER":"$USER" /opt/madsan
-git clone <repo-url> /opt/madsan
+git clone git@github.com:daniataal/mining-map.git /opt/madsan   # SSH deploy key, or HTTPS with PAT
 cd /opt/madsan
 
 # 3. Host env (paths differ pre/post split — see monorepo note below)
@@ -85,6 +99,8 @@ docker compose -f madsan/deploy/docker-compose.yml \
   --profile proxy up -d --build
 # Add --profile ais when AISSTREAM_API_KEY is set in deploy/.env
 ```
+
+**Private repo clone auth:** GitHub Actions passes `GITHUB_TOKEN` for the one-time clone during deploy. For manual `git pull` on the VM afterward, configure either an SSH deploy key (`git@github.com:…`) or a read-only PAT in `git credential` — do not store tokens in `.env`.
 
 Verify:
 
@@ -116,7 +132,7 @@ Deploy steps on the VM:
 8. Health check: `curl http://127.0.0.1/health` (Caddy → API)
 9. Scoped image cleanup (see below)
 
-**Prerequisite:** `/opt/madsan` must be a git checkout with `madsan/deploy/.env` configured (first-time bootstrap below). Deploy does not clone the repo or create `.env`.
+**First run:** if `/opt/madsan` is missing or not a git checkout, deploy auto-bootstraps (clone or legacy symlink), creates `.env` from `.env.example` when absent, and seeds empty prod volumes. Existing `madsan/deploy/.env` on the VM is never overwritten.
 
 ## Image cleanup strategy
 
