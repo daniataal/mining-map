@@ -38,3 +38,4 @@ madsan/data/gem/**
 madsan/data/jodi/**
 !madsan/data/jodi/README.md
 !madsan/data/jodi/.gitkeep
+madsan/.migration-staging/
