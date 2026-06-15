@@ -33,11 +33,11 @@ func LoadDeployEnv() {
 		key = strings.TrimSpace(key)
 		val = strings.TrimSpace(val)
 		val = strings.Trim(val, `"'`)
-		// Respect explicit env (including empty) so tests and shell exports win over deploy/.env.
+		// Respect non-empty explicit env so shell exports win over deploy/.env.
 		if key == "" {
 			continue
 		}
-		if _, exists := os.LookupEnv(key); exists {
+		if os.Getenv(key) != "" {
 			continue
 		}
 		_ = os.Setenv(key, val)

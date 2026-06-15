@@ -1,12 +1,10 @@
-name: Platform health
+# DEPRECATED — legacy mining-map / mining-viz / Python platform CI.
+# MadSan CI: .github/workflows/madsan-backend.yml, madsan-frontend.yml, madsan-docker.yml
+# Manual rerun only until legacy stack is retired or re-homed.
+name: Platform health (legacy, manual)
 
 on:
-  pull_request:
-  push:
-    branches:
-      - main
-      - master
-      - paperclip2
+  workflow_dispatch:
 
 jobs:
   unit:

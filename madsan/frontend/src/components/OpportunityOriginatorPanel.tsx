@@ -494,9 +494,12 @@ function CargoRow({
     >
       <Ship size={14} />
       <div>
+        <div className="opportunity-card-top">
+          <span className="badge partial compact">{item.evidence_label ?? "estimated"}</span>
+        </div>
         <strong>{item.vessel_name || item.imo || item.mmsi || "vessel"}</strong>
         <span>
-          {[item.product_family, qty, route, item.evidence_label].filter(Boolean).join(" · ")}
+          {[item.product_family, qty, route].filter(Boolean).join(" · ")}
         </span>
         <div className="opportunity-meta cargo-meta">
           {owner && <span>owner {owner}</span>}
@@ -539,19 +542,70 @@ function STSRow({ item }: { item: IntelSTSPrediction }) {
   const a = String(payload.vessel_a_name ?? payload.vessel_a ?? "");
   const b = String(payload.vessel_b_name ?? payload.vessel_b ?? "");
   const product = String(payload.product_hint ?? "");
+  const stsKind = textValue(payload.sts_kind) || textValue(payload.event_status) || "predicted";
   return (
     <div className="opportunity-row">
       <Waves size={14} />
       <div>
-        <strong>{[a, b].filter(Boolean).join(" / ") || "commercial STS pair"}</strong>
+        <div className="opportunity-card-top">
+          <span className="badge partial compact">predicted</span>
+          <small>{stsKind.replaceAll("_", " ")}</small>
+        </div>
+        <strong>{[a, b].filter(Boolean).join(" / ") || "predicted STS pair"}</strong>
         <span>
-          {[product, item.horizon_hours ? `${item.horizon_hours}h` : "", `${fmtScore(item.confidence_score)} confidence`]
+          {[product, item.horizon_hours ? `${item.horizon_hours}h horizon` : "", `${fmtScore(item.confidence_score)} confidence`]
             .filter(Boolean)
             .join(" · ")}
         </span>
       </div>
     </div>
   );
+}
+
+function GapStateList({ title, items }: { title?: string; items: string[] }) {
+  if (items.length === 0) return null;
+  return (
+    <div className="opportunity-inspector-section">
+      {title && <strong>{title}</strong>}
+      <div className="opportunity-contact-list">
+        {items.map((item) => (
+          <span key={item}>
+            <em>{item}</em>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function brokerAlphaGaps(params: {
+  opportunities: IntelOpportunity[];
+  cargo: IntelCargoMovement[];
+  sts: IntelSTSPrediction[];
+  importers: IntelImporter[];
+  investorPaths: IntelInvestorPath[];
+  selectedCargo: IntelCargoMovement | null;
+  margin: IntelArbitrage | null;
+}): string[] {
+  const gaps: string[] = [];
+  if (params.opportunities.length === 0 && params.cargo.length === 0) {
+    gaps.push("counterparty intent pending");
+  }
+  const hasRouteStress = params.opportunities.some(
+    (item) => numberValue(item.score_breakdown?.route_feasibility) != null,
+  );
+  if (!hasRouteStress) gaps.push("route stress pending");
+  if (params.cargo.length === 0) gaps.push("open tonnage pending");
+  const hasFeedstock = params.cargo.some((item) => textValue(item.product_family));
+  if (!hasFeedstock) gaps.push("feedstock fit pending");
+  gaps.push("tank stress pending");
+  if (params.opportunities.length === 0) gaps.push("repeat lane pending");
+  const cargoContacts = recordArray(params.selectedCargo?.commercial_chain?.contacts);
+  const hasOutreach = cargoContacts.length > 0
+    || params.investorPaths.some((item) => textValue(item.investor?.name));
+  if (!hasOutreach) gaps.push("outreach pack pending");
+  if (!params.margin) gaps.push("landed margin pending");
+  return gaps;
 }
 
 function ImporterRow({ item }: { item: IntelImporter }) {
@@ -564,6 +618,9 @@ function ImporterRow({ item }: { item: IntelImporter }) {
     <div className="opportunity-row">
       <Building2 size={14} />
       <div>
+        <div className="opportunity-card-top">
+          <span className="badge partial compact">reported</span>
+        </div>
         <strong>{item.name || "reported importer"}</strong>
         <span>
           {[
@@ -595,7 +652,7 @@ function ChainStepList({ steps }: { steps: Record<string, unknown>[] }) {
   if (steps.length === 0) return null;
   return (
     <div className="opportunity-inspector-section">
-      <strong>Chain steps</strong>
+      <strong>Commercial chain steps</strong>
       <div className="opportunity-inspector-steps">
         {steps.slice(0, 10).map((step, idx) => (
           <span key={`${textValue(step.step) || "step"}-${idx}`}>
@@ -680,8 +737,8 @@ function InvestorChainInspector({ item }: { item: IntelInvestorPath }) {
         <InspectorMetric label="score" value={fmtScore(item.score)} />
         <InspectorMetric label="role" value={item.investor?.exposure_role?.replaceAll("_", " ")} />
         <InspectorMetric label="exposure" value={exposureTypes} />
-        <InspectorMetric label="market" value={`supplier ${fmtScore(numberValue(item.market?.supplier_availability_score))} / buyer ${fmtScore(numberValue(item.market?.buyer_pressure_score))}`} />
-        <InspectorMetric label="price" value={price ? `${benchmark} USD ${price}` : benchmark} />
+        <InspectorMetric label="market stress" value={`supplier ${fmtScore(numberValue(item.market?.supplier_availability_score))} / buyer ${fmtScore(numberValue(item.market?.buyer_pressure_score))}`} />
+        <InspectorMetric label="benchmark context" value={price ? `${benchmark} USD ${price}` : benchmark} />
       </div>
       <ChainStepList steps={chain} />
       <OwnershipList rows={ownership} />
@@ -747,7 +804,7 @@ function CargoChainInspector({ item }: { item: IntelCargoMovement }) {
       )}
       {(importers.length > 0 || market.length > 0) && (
         <div className="opportunity-inspector-section">
-          <strong>Demand evidence</strong>
+          <strong>Buyer pressure and demand</strong>
           <div className="opportunity-contact-list">
             {market.slice(0, 3).map((row, idx) => (
               <span key={`market-${idx}`}>
@@ -878,7 +935,17 @@ function InvestorPathRow({
 
 function PriceContextPanel({ item }: { item: IntelOpportunity | null }) {
   const ctx = item?.price_context;
-  if (!ctx || Object.keys(ctx).length === 0) return null;
+  if (!ctx || Object.keys(ctx).length === 0) {
+    return (
+      <div className="opportunity-price-context">
+        <div>
+          <CircleDollarSign size={14} />
+          <strong>Benchmark context · indicative only</strong>
+        </div>
+        <span>Pink Sheet adapter pending</span>
+      </div>
+    );
+  }
   const benchmark = textValue(ctx.benchmark_key) || textValue(ctx.benchmark);
   const price = fmtPrice(ctx.price);
   const unit = textValue(ctx.unit);
@@ -889,12 +956,13 @@ function PriceContextPanel({ item }: { item: IntelOpportunity | null }) {
     <div className="opportunity-price-context">
       <div>
         <CircleDollarSign size={14} />
-        <strong>Price context</strong>
+        <strong>Benchmark context · indicative only</strong>
       </div>
       <span>
         {[benchmark, price ? `${currency} ${price}${unit}` : "", observedAt].filter(Boolean).join(" · ")}
       </span>
       {context && <small>{context}</small>}
+      <small>Scenario context only — not a buy, sell, or price forecast.</small>
     </div>
   );
 }
@@ -904,7 +972,7 @@ function MarginPanel({ value }: { value: IntelArbitrage | null }) {
     return (
       <div className="opportunity-margin-empty">
         <CircleDollarSign size={15} />
-        <span>No margin context selected</span>
+        <span>landed margin pending</span>
       </div>
     );
   }
@@ -917,12 +985,13 @@ function MarginPanel({ value }: { value: IntelArbitrage | null }) {
     <div className="opportunity-margin">
       <div className="opportunity-margin-head">
         <CircleDollarSign size={15} />
-        <strong>{value.commodity || "commodity"} margin context</strong>
+        <strong>Scenario margin · indicative only</strong>
       </div>
       <span>
-        {[value.origin, value.destination].filter(Boolean).join(" -> ")}
+        {[value.commodity, [value.origin, value.destination].filter(Boolean).join(" -> ")].filter(Boolean).join(" · ")}
         {price ? ` · ${benchmarkName ? `${benchmarkName} ` : ""}${currency} ${price}${unit}` : ""}
       </span>
+      <small>Freight curve, quality adjustment, and landed margin bands may still be pending.</small>
     </div>
   );
 }
@@ -972,6 +1041,18 @@ export default function OpportunityOriginatorPanel({
   const selectedCargo = useMemo(
     () => cargo.find((item) => `${item.source ?? "cargo"}-${item.id}` === selectedCargoId) ?? null,
     [cargo, selectedCargoId],
+  );
+  const alphaGaps = useMemo(
+    () => brokerAlphaGaps({
+      opportunities,
+      cargo,
+      sts,
+      importers,
+      investorPaths,
+      selectedCargo,
+      margin,
+    }),
+    [opportunities, cargo, sts, importers, investorPaths, selectedCargo, margin],
   );
 
   const compareMargin = async (item: IntelOpportunity | null) => {
@@ -1032,7 +1113,7 @@ export default function OpportunityOriginatorPanel({
         <div>
           <Route size={15} />
           <strong>{opportunities.length}</strong>
-          <span>lanes</span>
+          <span>chains</span>
         </div>
         <div>
           <Gauge size={15} />
@@ -1042,7 +1123,7 @@ export default function OpportunityOriginatorPanel({
         <div>
           <BarChart3 size={15} />
           <strong>{investorPaths.length}</strong>
-          <span>paths</span>
+          <span>ownership</span>
         </div>
         <div>
           <Building2 size={15} />
@@ -1053,17 +1134,20 @@ export default function OpportunityOriginatorPanel({
 
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
-          <TabsTrigger value="lanes">Lanes</TabsTrigger>
-          <TabsTrigger value="investors">Investors</TabsTrigger>
+          <TabsTrigger value="lanes">Chain</TabsTrigger>
+          <TabsTrigger value="investors">Ownership</TabsTrigger>
           <TabsTrigger value="buyers">Buyers</TabsTrigger>
           <TabsTrigger value="cargo">Cargo</TabsTrigger>
           <TabsTrigger value="sts">STS</TabsTrigger>
         </TabsList>
 
         <TabsContent value="lanes">
-          {loading && <p className="opportunity-muted">Loading opportunities...</p>}
+          {loading && <p className="opportunity-muted">Loading commercial chains...</p>}
           {!loading && opportunities.length === 0 && (
-            <p className="opportunity-muted">No active opportunity candidates.</p>
+            <GapStateList
+              title="Commercial chain"
+              items={["repeat lane pending", "counterparty intent pending"]}
+            />
           )}
           <div className="opportunity-card-stack">
             {opportunities.map((item) => (
@@ -1079,7 +1163,10 @@ export default function OpportunityOriginatorPanel({
 
         <TabsContent value="investors">
           {!loading && investorPaths.length === 0 && (
-            <p className="opportunity-muted">No named investor control paths yet.</p>
+            <GapStateList
+              title="Ownership and control"
+              items={["previous ownership check pending", "ownership path pending"]}
+            />
           )}
           <div className="opportunity-card-stack">
             {investorPaths.map((item) => (
@@ -1094,7 +1181,12 @@ export default function OpportunityOriginatorPanel({
         </TabsContent>
 
         <TabsContent value="buyers">
-          {!loading && importers.length === 0 && <p className="opportunity-muted">No reported importers yet.</p>}
+          {!loading && importers.length === 0 && (
+            <GapStateList
+              title="Buyers"
+              items={["buyer pressure pending", "reported importer pending"]}
+            />
+          )}
           <div className="opportunity-list">
             {importers.map((item) => (
               <ImporterRow
@@ -1106,7 +1198,12 @@ export default function OpportunityOriginatorPanel({
         </TabsContent>
 
         <TabsContent value="cargo">
-          {!loading && cargo.length === 0 && <p className="opportunity-muted">No cargo movement clues yet.</p>}
+          {!loading && cargo.length === 0 && (
+            <GapStateList
+              title="Cargo and voyages"
+              items={["open tonnage pending", "cargo movement pending"]}
+            />
+          )}
           <div className="opportunity-list">
             {cargo.map((item) => (
               <CargoRow
@@ -1120,7 +1217,16 @@ export default function OpportunityOriginatorPanel({
         </TabsContent>
 
         <TabsContent value="sts">
-          {!loading && sts.length === 0 && <p className="opportunity-muted">No active commercial STS predictions.</p>}
+          {!loading && sts.length === 0 && (
+            <GapStateList
+              title="STS coverage"
+              items={[
+                "open tonnage pending — no open-vessel STS lead yet",
+                "no predicted STS pair yet",
+                "no active or completed STS event yet",
+              ]}
+            />
+          )}
           <div className="opportunity-list">
             {sts.map((item) => (
               <STSRow key={item.id} item={item} />
@@ -1138,15 +1244,19 @@ export default function OpportunityOriginatorPanel({
           disabled={!selected || marginLoading}
           onClick={() => compareMargin(selected)}
         >
-          {marginLoading ? "Comparing..." : "Compare landed margin"}
+          {marginLoading ? "Comparing..." : "Compare scenario margin"}
         </button>
         {selected?.lane_id && <span>{selected.lane_id}</span>}
       </div>
 
       <PriceContextPanel item={selected} />
       <MarginPanel value={margin} />
+      {!loading && alphaGaps.length > 0 && (
+        <GapStateList title="Broker alpha gaps" items={alphaGaps} />
+      )}
       <p className="disclaimer">
-        Evidence labels separate reported assets, estimated pressure, inferred lanes, and predicted STS.
+        Evidence labels separate observed, reported, source-backed, inferred, estimated, and predicted intelligence.
+        Market and margin panels are indicative scenario context only — not buy, sell, or forecast signals.
       </p>
     </div>
   );

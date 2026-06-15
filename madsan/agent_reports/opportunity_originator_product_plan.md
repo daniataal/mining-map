@@ -33,6 +33,7 @@ Each full dossier should converge toward these sections:
 - STS leads: open-to-STS vessels, predicted STS pairs, active/completed STS events, owner/operator contacts, buyer/supplier rationale.
 - Contacts: direct emails/phones when available, otherwise official source refs and verification pivots.
 - Prices and margin: benchmark context, freight/quality adjustments, landed margin.
+- Market stress: JODI physical stress, import dependency, production-adjusted buyer pressure, Pink Sheet/EIA benchmark context, and scenario margin bands.
 - Evidence: GEM, JODI, EIA, registry, AIS, import/procurement, and source provenance.
 - Risk: sanctions, stale data, weak ownership, spoofing, emissions/compliance, and confidence limitations.
 
@@ -62,3 +63,16 @@ STS should be split into:
 - `Risk`: spoofing, sanctions, stale AIS, unclear ownership, weak cargo evidence, and compliance exposure.
 
 Each STS card should expose vessel identity, current zone, product hint, cargo quantity range when available, owner/operator/manager, contacts/source refs, likely supplier/buyer rationale, price or market reason, confidence, and evidence labels.
+
+## Price And Market Stress Product Surface
+
+Price context should eventually include:
+
+- World Bank Pink Sheet monthly benchmark cards.
+- EIA spot/product/gas benchmark cards.
+- JODI continuous stress scores.
+- import-dependency buyer pressure.
+- supplier availability and supply shock indicators.
+- freight/quality/landed-margin assumptions when available.
+
+This should be presented as market intelligence and scenario context, not guaranteed price prediction or investment advice.

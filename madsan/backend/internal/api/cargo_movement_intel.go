@@ -657,14 +657,12 @@ func cargoContactability(bundles []map[string]any) map[string]any {
 			stringFromAny(bundle["source_ref"]) != "" {
 			sourceLinks++
 		}
-		if rows, ok := bundle["contacts"].([]map[string]any); ok {
-			for _, row := range rows {
-				if stringFromAny(row["email"]) != "" || stringFromAny(row["phone"]) != "" {
-					direct++
-				}
-				if stringFromAny(row["source_url"]) != "" || stringFromAny(row["source_ref"]) != "" || stringFromAny(row["evidence"]) != "" {
-					sourceLinks++
-				}
+		for _, row := range recordArrayFromAny(bundle["contacts"]) {
+			if stringFromAny(row["email"]) != "" || stringFromAny(row["phone"]) != "" {
+				direct++
+			}
+			if stringFromAny(row["source_url"]) != "" || stringFromAny(row["source_ref"]) != "" || stringFromAny(row["evidence"]) != "" {
+				sourceLinks++
 			}
 		}
 	}

@@ -177,6 +177,12 @@ type RelationshipEdge = {
 type Props = {
   selection: MapSelection | null;
   vertical?: "energy" | "metals";
+  commercialChainSummary?: {
+    loading?: boolean;
+    chainCount: number;
+    evidenceCount: number;
+    previewLines: string[];
+  };
   pipelineMapFocused?: boolean;
   onNavigate?: (selection: MapSelection, focus?: { lat: number; lng: number }) => void;
   onRelationshipLines?: (lines: FeatureCollection) => void;
@@ -429,6 +435,7 @@ function buildSelectionShell(selection: MapSelection): Dossier {
 export default function EntityDossierPanel({
   selection,
   vertical = "energy",
+  commercialChainSummary,
   pipelineMapFocused,
   onNavigate,
   onRelationshipLines,
@@ -738,6 +745,8 @@ export default function EntityDossierPanel({
   const enrichment =
     dossier.entity_type === "asset" ? resolveAssetEnrichment(dossier) : null;
   const entityId = dossier.id || selection.id || "";
+  const hasMappedChains = assetChains.length > 0;
+  const hasIntelChain = !hasMappedChains && (commercialChainSummary?.chainCount ?? 0) > 0;
 
   return (
     <div className="dossier-tabbed">
@@ -772,10 +781,18 @@ export default function EntityDossierPanel({
       {vertical === "energy" && (selection._entityType === "asset" || selection._entityType === "company") ? (
         <div className="asset-chain-card">
           <div className="asset-chain-head">
-            <strong>Chain on map</strong>
-            <span>{chainsLoading ? "loading" : `${assetChains.length} path${assetChains.length === 1 ? "" : "s"}`}</span>
+            <strong>{hasMappedChains ? "Chain on map" : hasIntelChain ? "Intel chain" : "Chain on map"}</strong>
+            <span>
+              {chainsLoading || commercialChainSummary?.loading
+                ? "loading"
+                : hasMappedChains
+                  ? `${assetChains.length} mapped path${assetChains.length === 1 ? "" : "s"}`
+                  : hasIntelChain
+                    ? `${commercialChainSummary?.chainCount ?? 0} evidence chain${commercialChainSummary?.chainCount === 1 ? "" : "s"}`
+                    : "0 paths"}
+            </span>
           </div>
-          {assetChains[0] ? (
+          {hasMappedChains && assetChains[0] ? (
             <>
               <p>{assetChains[0].commercial_thesis}</p>
               <div className="asset-chain-sequence">
@@ -788,6 +805,21 @@ export default function EntityDossierPanel({
               </div>
               <small>
                 The map is drawing every chain step with coordinates; capital, ownership, cargo, and price steps remain in the intel chain even when they are not geographic.
+              </small>
+            </>
+          ) : hasIntelChain ? (
+            <>
+              <p>Commercial chain evidence is attached, but no geographic opportunity path is mapped yet.</p>
+              <div className="asset-chain-sequence">
+                {(commercialChainSummary?.previewLines ?? []).slice(0, 6).map((line, idx) => (
+                  <span key={`intel-chain-${idx}`}>
+                    <b>intel</b>
+                    <em>{line}</em>
+                  </span>
+                ))}
+              </div>
+              <small>
+                These are evidence-chain steps from the dossier; map geometry appears when supplier, route, vessel, and buyer nodes have coordinates.
               </small>
             </>
           ) : (

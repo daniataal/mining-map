@@ -7,12 +7,12 @@ import AppShell from "@/components/AppShell";
 import EntityDossierPanel, { type MapSelection } from "@/components/EntityDossierPanel";
 import {
   fetchIntelCommercialProfile,
-  type IntelCargoMovement,
+  normalizeEvidenceLabel,
+  shapeDossierWorkspace,
   type IntelCommercialProfile,
-  type IntelImporter,
-  type IntelInvestorPath,
-  type IntelOpportunity,
-  type IntelSTSPrediction,
+  type DossierGap,
+  type DossierSectionItem,
+  type DossierTabKey,
 } from "@/lib/energyApi";
 
 type Props = {
@@ -21,6 +21,24 @@ type Props = {
   name?: string;
   legacy?: string;
 };
+
+type CommercialChainSummary = {
+  loading?: boolean;
+  chainCount: number;
+  evidenceCount: number;
+  previewLines: string[];
+};
+
+const DOSSIER_TABS: Array<{ id: DossierTabKey; label: string }> = [
+  { id: "chain", label: "Chain" },
+  { id: "cargo", label: "Cargo" },
+  { id: "buyers", label: "Buyers" },
+  { id: "suppliers", label: "Suppliers" },
+  { id: "ownership", label: "Ownership" },
+  { id: "contacts", label: "Contacts" },
+  { id: "market", label: "Market" },
+  { id: "risk", label: "Risk" },
+];
 
 function normalizedEntityType(value: string): "asset" | "company" | "vessel" {
   const clean = value.toLowerCase().replace(/s$/, "");
@@ -52,112 +70,176 @@ function textValue(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
-function numberValue(value: unknown): number | undefined {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string") {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : undefined;
-  }
-  return undefined;
+function EvidenceBadge({ label }: { label: string }) {
+  const kind = normalizeEvidenceLabel(label);
+  return <span className={`evidence-label evidence-label--${kind}`}>{kind}</span>;
 }
 
-function recordValue(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
+function CommercialGap({ children }: { children: ReactNode }) {
+  return <span className="commercial-gap">{children}</span>;
 }
 
-function recordArray(value: unknown): Record<string, unknown>[] {
-  return Array.isArray(value)
-    ? value.filter((item): item is Record<string, unknown> => !!item && typeof item === "object" && !Array.isArray(item))
-    : [];
+function sourceHref(item: DossierSectionItem): string | undefined {
+  const raw = item.raw ?? {};
+  const href =
+    textValue(raw.source_url) ||
+    textValue(raw.register_source_url) ||
+    textValue(raw.url) ||
+    textValue(raw.website);
+  return href.startsWith("http") ? href : undefined;
 }
 
-function typedArray<T>(value: unknown): T[] {
-  return Array.isArray(value) ? (value as T[]) : [];
+function ActionCue({ label, href }: { label: string; href?: string }) {
+  if (!href) return null;
+  return (
+    <a className="commercial-action commercial-action--enabled" href={href} target="_blank" rel="noreferrer">
+      {label}
+    </a>
+  );
 }
 
-function fmtScore(value?: number): string {
-  if (value == null || Number.isNaN(value)) return "0";
-  return Math.round(value).toLocaleString();
-}
-
-function fmtCompact(value: unknown): string {
-  const n = numberValue(value);
-  if (n == null || n === 0) return "";
-  return n.toLocaleString(undefined, { maximumFractionDigits: 1 });
-}
-
-function shortDate(iso?: string): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
-
-function chainStepName(node: Record<string, unknown>): string {
-  return textValue(node.short_label) || textValue(node.step).replaceAll("_", " ") || "step";
-}
-
-function DossierIntelCard({
-  label,
-  title,
-  meta,
-  children,
-}: {
-  label: string;
-  title: string;
-  meta?: string;
-  children?: ReactNode;
-}) {
+function DossierIntelCard({ item }: { item: DossierSectionItem }) {
+  const href = sourceHref(item);
+  const lines = item.lines.filter(Boolean);
   return (
     <article className="commercial-card">
       <div className="commercial-card-head">
-        <span>{label}</span>
-        {meta && <strong>{meta}</strong>}
+        <EvidenceBadge label={item.evidenceLabel} />
+        {item.meta && <strong>{item.meta}</strong>}
       </div>
-      <h3>{title}</h3>
-      {children}
+      <h3>{item.title}</h3>
+      {lines.length > 0 && (
+        <div className="commercial-card-lines">
+          {lines.map((line, idx) => (
+            <p key={`${item.id}-line-${idx}`}>{line}</p>
+          ))}
+        </div>
+      )}
+      {href && (
+        <div className="commercial-action-row">
+          <ActionCue label="Open source" href={href} />
+        </div>
+      )}
     </article>
   );
 }
 
-function EmptyIntel({ children }: { children: ReactNode }) {
-  return <p className="commercial-empty">{children}</p>;
+function GapPanel({ title, gaps }: { title: string; gaps: DossierGap[] }) {
+  if (gaps.length === 0) return null;
+  return (
+    <div className="commercial-gap-panel">
+      <strong>{title}</strong>
+      <div className="commercial-gap-row">
+        {gaps.map((gap) => (
+          <CommercialGap key={gap.key}>{gap.label}</CommercialGap>
+        ))}
+      </div>
+      {gaps.some((gap) => gap.unlockHint) && (
+        <div className="commercial-gap-hints">
+          {gaps.map((gap) =>
+            gap.unlockHint ? <p key={`${gap.key}-hint`}>{gap.unlockHint}</p> : null,
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
-function contactLabel(item: Record<string, unknown>): string {
-  return textValue(item.role).replaceAll("_", " ") || textValue(item.tier) || "contact";
+function EmptyIntel({ children, unlock }: { children: ReactNode; unlock?: string }) {
+  return (
+    <div className="commercial-empty">
+      <p>{children}</p>
+      {unlock && <p className="commercial-empty-unlock">{unlock}</p>}
+    </div>
+  );
 }
 
-function bestContactLine(item: Record<string, unknown>): string {
-  const nested = recordArray(item.contacts);
-  const firstNested = nested[0];
-  return [
-    textValue(item.email) || textValue(firstNested?.email),
-    textValue(item.phone) || textValue(firstNested?.phone),
-    textValue(item.website),
-    textValue(item.source_url) || textValue(item.register_source_url) || textValue(item.source_ref),
-  ].filter(Boolean).join(" · ");
+function emptyTabCopy(tab: DossierTabKey): { message: string; unlock: string } {
+  switch (tab) {
+    case "chain":
+      return {
+        message: "No investor, cargo, or recurring lane chain is attached to this entity yet.",
+        unlock: "Investor paths, cargo commercial_chain, or opportunity lane geometry would unlock this tab.",
+      };
+    case "cargo":
+      return {
+        message: "No linked cargo movement or STS intelligence is attached yet.",
+        unlock: "AIS destination, port calls, voyage evidence, or STS predictions would unlock cargo clues.",
+      };
+    case "buyers":
+      return {
+        message: "No direct importer or buyer asset record is linked yet.",
+        unlock: "Trade-flow importers, destination market pressure, or buyer asset links would unlock buyer evidence.",
+      };
+    case "suppliers":
+      return {
+        message: "No scored supplier/lane opportunity is linked yet.",
+        unlock: "Scored lane opportunities linking supplier assets to buyer pressure would unlock supplier cards.",
+      };
+    case "ownership":
+      return {
+        message: "No ownership chain, registry check, or investor exposure is attached yet.",
+        unlock: "Ownership chain, registry checks, name history, or investor exposures would unlock ownership evidence.",
+      };
+    case "contacts":
+      return {
+        message: "No manager or contact bundle is attached yet.",
+        unlock: "Shipvault contacts, cargo chain contact bundles, or operator outreach sources would unlock contact cards.",
+      };
+    case "market":
+      return {
+        message: "No benchmark or market-pressure context is linked yet.",
+        unlock: "Pink Sheet benchmarks, JODI market stress, freight curves, or landed-margin adapters would unlock market context.",
+      };
+    case "risk":
+      return {
+        message: "No risk notes are attached yet.",
+        unlock: "Evidence limits, stale data, weak ownership, and inferred opportunity notes would appear here.",
+      };
+  }
 }
 
-function ownershipRows(profile: IntelCommercialProfile | null): Record<string, unknown>[] {
-  const linked = recordValue(profile?.linked_intel);
-  const rows = [
-    ...recordArray(profile?.ownership_chain),
-    ...recordArray(linked?.ownership_chain),
-  ];
-  const ownershipIntel = recordValue(profile?.ownership_intel);
-  rows.push(...recordArray(ownershipIntel?.history_candidates));
-  rows.push(...recordArray(ownershipIntel?.registry_checks));
-  return rows;
+function DossierTabPanel({ activeTab, view }: { activeTab: DossierTabKey; view: ReturnType<typeof shapeDossierWorkspace> }) {
+  const tab = view.tabs[activeTab];
+  const empty = emptyTabCopy(activeTab);
+  const gapTitle =
+    activeTab === "market"
+      ? "Market adapter gaps"
+      : activeTab === "cargo"
+        ? "Cargo and STS gaps"
+        : activeTab === "risk"
+          ? "Risk and verification gaps"
+          : "Broker alpha gaps";
+  return (
+    <div className="commercial-tab-panel">
+      {tab.items.length === 0 ? (
+        <EmptyIntel unlock={empty.unlock}>{empty.message}</EmptyIntel>
+      ) : (
+        tab.items.map((item) => <DossierIntelCard key={item.id} item={item} />)
+      )}
+      <GapPanel title={gapTitle} gaps={tab.gaps} />
+    </div>
+  );
 }
 
-function CommercialDossierWorkspace({ selection }: { selection: MapSelection }) {
+function CommercialDossierWorkspace({
+  selection,
+  activeTab,
+  onTabChange,
+  onSummaryChange,
+}: {
+  selection: MapSelection;
+  activeTab: DossierTabKey;
+  onTabChange: (tab: DossierTabKey) => void;
+  onSummaryChange?: (summary: CommercialChainSummary) => void;
+}) {
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState<IntelCommercialProfile | null>(null);
 
+  const entityType = (selection._entityType ?? "asset") as "asset" | "company" | "vessel";
+
   useEffect(() => {
     let cancelled = false;
-    const entityType = (selection._entityType ?? "asset") as "asset" | "company" | "vessel";
     const entityID = entityType === "vessel" ? selection.mmsi : selection.id;
     if (!entityID) {
       setProfile(null);
@@ -178,215 +260,55 @@ function CommercialDossierWorkspace({ selection }: { selection: MapSelection }) 
     return () => {
       cancelled = true;
     };
-  }, [selection.id, selection.mmsi, selection.name, selection._entityType]);
+  }, [selection.id, selection.mmsi, selection.name, entityType]);
 
-  const linked = profile?.linked_intel ?? {};
-  const paths = typedArray<IntelInvestorPath>(linked.investor_paths);
-  const opportunities = typedArray<IntelOpportunity>(linked.opportunities);
-  const cargo = typedArray<IntelCargoMovement>(linked.cargo_movements);
-  const importers = typedArray<IntelImporter>(linked.importers);
-  const sts = typedArray<IntelSTSPrediction>(linked.sts_predictions);
-  const contacts = [
-    ...recordArray(profile?.commercial_contacts),
-    ...recordArray(profile?.contacts),
-  ];
-  const ownership = ownershipRows(profile);
-  const exposures = [
-    ...recordArray(profile?.investor_exposures),
-    ...recordArray(linked.investor_exposures),
-  ];
-  const evidenceCount = paths.length + opportunities.length + cargo.length + importers.length + sts.length + contacts.length + ownership.length + exposures.length;
+  const view = useMemo(() => shapeDossierWorkspace(profile, entityType), [profile, entityType]);
+
+  useEffect(() => {
+    const chainItems = view.tabs.chain.items;
+    onSummaryChange?.({
+      loading,
+      chainCount: loading ? 0 : view.tabs.chain.count,
+      evidenceCount: loading ? 0 : view.evidenceCount,
+      previewLines: chainItems
+        .flatMap((item) => [item.title, ...item.lines.slice(0, 3)])
+        .filter(Boolean)
+        .slice(0, 8),
+    });
+  }, [loading, onSummaryChange, view]);
 
   return (
     <section className="commercial-dossier-workspace">
       <div className="commercial-workspace-head">
         <div>
           <span>Commercial intelligence</span>
-          <h2>Chains, counterparties, vessels, and risk</h2>
+          <h2>Analyst workspace</h2>
         </div>
-        <strong>{loading ? "loading" : `${evidenceCount} linked item${evidenceCount === 1 ? "" : "s"}`}</strong>
+        <strong>{loading ? "loading" : `${view.evidenceCount} linked item${view.evidenceCount === 1 ? "" : "s"}`}</strong>
       </div>
 
-      <div className="commercial-section-grid">
-        <section id="chain">
-          <div className="commercial-section-title">
-            <strong>Chain</strong>
-            <span>{paths.length} path{paths.length === 1 ? "" : "s"}</span>
-          </div>
-          {paths.length === 0 ? (
-            <EmptyIntel>No investor/control chain is attached to this entity yet.</EmptyIntel>
-          ) : paths.slice(0, 4).map((item) => {
-            const chain = recordArray(item.control_chain);
-            return (
-              <DossierIntelCard
-                key={item.id}
-                label={item.evidence_label ?? "inferred"}
-                title={item.investor?.name || "reported investor path"}
-                meta={fmtScore(item.score)}
-              >
-                {item.commercial_thesis && <p>{item.commercial_thesis}</p>}
-                <div className="commercial-chain-mini">
-                  {chain.slice(0, 7).map((node, idx) => (
-                    <span key={`${item.id}-${idx}`}>
-                      <b>{chainStepName(node)}</b>
-                      <em>{textValue(node.label) || textValue(node.asset)}</em>
-                    </span>
-                  ))}
-                </div>
-              </DossierIntelCard>
-            );
-          })}
-        </section>
+      <div className="commercial-dossier-tabs" role="tablist" aria-label="Commercial dossier sections">
+        {DOSSIER_TABS.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === tab.id}
+            className={`commercial-dossier-tab${activeTab === tab.id ? " is-active" : ""}`}
+            onClick={() => onTabChange(tab.id)}
+          >
+            {tab.label}
+            <em>{view.tabs[tab.id].count}</em>
+          </button>
+        ))}
+      </div>
 
-        <section id="buyers">
-          <div className="commercial-section-title">
-            <strong>Buyers and importers</strong>
-            <span>{importers.length} linked</span>
-          </div>
-          {importers.length === 0 ? (
-            <EmptyIntel>No direct importer record is linked to this entity yet.</EmptyIntel>
-          ) : importers.map((item) => (
-            <DossierIntelCard
-              key={`${item.company_id || item.name}-${item.product_code}-${item.origin_country?.country_code}`}
-              label={item.evidence_label ?? "reported"}
-              title={item.name || "reported importer"}
-              meta={item.product_code}
-            >
-              <p>
-                {[item.origin_country?.country_code ? `from ${item.origin_country.country_code}` : "", fmtCompact(item.quantity?.value), item.quantity?.unit, item.latest_month ? shortDate(item.latest_month) : ""]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </p>
-            </DossierIntelCard>
-          ))}
-        </section>
-
-        <section id="suppliers">
-          <div className="commercial-section-title">
-            <strong>Supplier and lane opportunities</strong>
-            <span>{opportunities.length} lanes</span>
-          </div>
-          {opportunities.length === 0 ? (
-            <EmptyIntel>No scored lane opportunity is linked to this entity yet.</EmptyIntel>
-          ) : opportunities.map((item) => {
-            const supplier = item.evidence?.find((evidence) => textValue(evidence.role) === "supplier_asset");
-            const buyer = item.evidence?.find((evidence) => textValue(evidence.role) === "buyer_asset");
-            return (
-              <DossierIntelCard
-                key={item.id}
-                label={item.evidence_grade ?? "inferred"}
-                title={`${item.commodity ?? "oil/gas"} · ${item.origin_country ?? "?"} -> ${item.destination_country ?? "?"}`}
-                meta={fmtScore(item.score)}
-              >
-                <p>{[textValue(supplier?.asset_name) || "supplier side", textValue(buyer?.asset_name) || "buyer side"].join(" -> ")}</p>
-                <div className="commercial-score-row">
-                  <span>supplier {fmtScore(item.score_breakdown?.supplier_reality)}</span>
-                  <span>buyer {fmtScore(item.score_breakdown?.buyer_reality)}</span>
-                  <span>market {fmtScore(item.score_breakdown?.market_pressure)}</span>
-                </div>
-              </DossierIntelCard>
-            );
-          })}
-        </section>
-
-        <section id="vessels">
-          <div className="commercial-section-title">
-            <strong>Vessels and cargo</strong>
-            <span>{cargo.length + sts.length} items</span>
-          </div>
-          {cargo.length === 0 && sts.length === 0 ? (
-            <EmptyIntel>No linked cargo or commercial STS movement is attached yet.</EmptyIntel>
-          ) : (
-            <>
-              {cargo.map((item) => {
-                const qty = item.quantity?.best ? `${Math.round(item.quantity.best).toLocaleString()} ${item.quantity.unit ?? "t"}` : "";
-                return (
-                  <DossierIntelCard
-                    key={`${item.source}-${item.id}`}
-                    label={item.evidence_label ?? "estimated"}
-                    title={item.vessel_name || item.imo || item.mmsi || "cargo movement"}
-                    meta={item.product_family}
-                  >
-                    <p>{[qty, item.owner_name ? `owner ${item.owner_name}` : "", item.route_hint?.latest_destination ? `dest ${item.route_hint.latest_destination}` : ""].filter(Boolean).join(" · ")}</p>
-                  </DossierIntelCard>
-                );
-              })}
-              {sts.map((item) => {
-                const payload = item.payload ?? {};
-                return (
-                  <DossierIntelCard
-                    key={item.id}
-                    label={item.evidence_label ?? "predicted"}
-                    title={[payload.vessel_a_name, payload.vessel_b_name].map((value) => String(value ?? "")).filter(Boolean).join(" / ") || "STS pair"}
-                    meta={`${fmtScore(item.confidence_score)} confidence`}
-                  >
-                    <p>{[textValue(payload.product_hint), item.horizon_hours ? `${item.horizon_hours}h horizon` : ""].filter(Boolean).join(" · ")}</p>
-                  </DossierIntelCard>
-                );
-              })}
-            </>
-          )}
-        </section>
-
-        <section id="contacts">
-          <div className="commercial-section-title">
-            <strong>Contacts and ownership</strong>
-            <span>{contacts.length + ownership.length + exposures.length} records</span>
-          </div>
-          {contacts.length === 0 && ownership.length === 0 && exposures.length === 0 ? (
-            <EmptyIntel>No manager, contact, ownership, or investor exposure record is attached yet.</EmptyIntel>
-          ) : (
-            <>
-              {contacts.slice(0, 6).map((item, idx) => (
-                <DossierIntelCard
-                  key={`contact-${idx}-${textValue(item.company_id) || textValue(item.name)}`}
-                  label={contactLabel(item)}
-                  title={textValue(item.name) || textValue(item.company_id) || "source-backed contact"}
-                  meta={textValue(item.country_code) || textValue(item.shipvault_country)}
-                >
-                  <p>{bestContactLine(item) || "source-backed contact bundle"}</p>
-                </DossierIntelCard>
-              ))}
-              {ownership.slice(0, 6).map((item, idx) => (
-                <DossierIntelCard
-                  key={`ownership-${idx}-${textValue(item.owner_entity_id) || textValue(item.label) || textValue(item.name)}`}
-                  label={textValue(item.evidence_label) || textValue(item.status) || "source-backed"}
-                  title={textValue(item.owner_name) || textValue(item.label) || textValue(item.name) || textValue(item.check) || "ownership evidence"}
-                  meta={textValue(item.parent_name) || textValue(recordValue(item.parent)?.name) || textValue(item.source)}
-                >
-                  <p>{[textValue(item.operator_name), textValue(item.detail), textValue(item.previous_ownership_status)].filter(Boolean).join(" · ") || "ownership, registry, or historical identity clue"}</p>
-                </DossierIntelCard>
-              ))}
-              {exposures.slice(0, 4).map((item, idx) => (
-                <DossierIntelCard
-                  key={`exposure-${idx}-${textValue(item.id)}`}
-                  label={textValue(item.exposure_type) || "investor"}
-                  title={textValue(item.investor_name) || "investor exposure"}
-                  meta={fmtCompact(item.exposure_value)}
-                >
-                  <p>{[textValue(item.commodity), textValue(item.country_code), textValue(item.exposure_unit)].filter(Boolean).join(" · ")}</p>
-                </DossierIntelCard>
-              ))}
-            </>
-          )}
-        </section>
-
-        <section id="risk">
-          <div className="commercial-section-title">
-            <strong>Risk and gaps</strong>
-            <span>evidence limits</span>
-          </div>
-          <DossierIntelCard label="risk" title="Current limitations">
-            <ul className="commercial-risk-list">
-              {paths.length === 0 && <li>No investor/control path is linked yet.</li>}
-              {opportunities.length === 0 && <li>No scored supplier/buyer lane touches this entity yet.</li>}
-              {cargo.length === 0 && <li>No cargo clue currently resolves to this entity.</li>}
-              {contacts.length === 0 && <li>No direct manager/contact bundle is attached yet.</li>}
-              {selection._entityType === "asset" && <li>Asset role may be operator, terminal, buyer, supplier, or route node depending on source evidence.</li>}
-              <li>Every inferred opportunity should be verified before outreach.</li>
-            </ul>
-          </DossierIntelCard>
-        </section>
+      <div className="commercial-tab-content" role="tabpanel">
+        {loading ? (
+          <EmptyIntel>Loading commercial profile…</EmptyIntel>
+        ) : (
+          <DossierTabPanel activeTab={activeTab} view={view} />
+        )}
       </div>
     </section>
   );
@@ -402,6 +324,13 @@ export default function DossierPageClient({ entityType, id, name, legacy }: Prop
     type: "FeatureCollection",
     features: [],
   });
+  const [activeTab, setActiveTab] = useState<DossierTabKey>("chain");
+  const [commercialSummary, setCommercialSummary] = useState<CommercialChainSummary>({
+    loading: true,
+    chainCount: 0,
+    evidenceCount: 0,
+    previewLines: [],
+  });
 
   useEffect(() => {
     setSelection(initialSelection);
@@ -409,6 +338,8 @@ export default function DossierPageClient({ entityType, id, name, legacy }: Prop
 
   const type = normalizedEntityType(entityType);
   const mappedFeatures = relationshipLines.features.length;
+  const chainKpiValue = mappedFeatures > 0 ? mappedFeatures : commercialSummary.chainCount;
+  const chainKpiLabel = mappedFeatures > 0 ? "mapped chain" : commercialSummary.chainCount > 0 ? "intel chain" : "mapped chain";
 
   return (
     <AppShell maxWidth="full">
@@ -423,8 +354,8 @@ export default function DossierPageClient({ entityType, id, name, legacy }: Prop
           </div>
           <div className="intel-dossier-kpis">
             <span>
-              <small>mapped chain</small>
-              <strong>{mappedFeatures}</strong>
+              <small>{commercialSummary.loading ? "chain" : chainKpiLabel}</small>
+              <strong>{commercialSummary.loading ? "…" : chainKpiValue}</strong>
             </span>
             <span>
               <small>surface</small>
@@ -438,6 +369,7 @@ export default function DossierPageClient({ entityType, id, name, legacy }: Prop
             <EntityDossierPanel
               selection={selection}
               vertical="energy"
+              commercialChainSummary={commercialSummary}
               onRelationshipLines={setRelationshipLines}
               onNavigate={(feat) => {
                 setSelection({
@@ -447,18 +379,26 @@ export default function DossierPageClient({ entityType, id, name, legacy }: Prop
                 });
               }}
             />
-            <CommercialDossierWorkspace selection={selection} />
+            <CommercialDossierWorkspace
+              selection={selection}
+              activeTab={activeTab}
+              onTabChange={setActiveTab}
+              onSummaryChange={setCommercialSummary}
+            />
           </section>
           <aside className="intel-dossier-side">
             <div>
               <strong>Commercial index</strong>
-              <span>Chain</span>
-              <span>Buyers</span>
-              <span>Suppliers</span>
-              <span>Vessels</span>
-              <span>Contacts</span>
-              <span>Evidence</span>
-              <span>Risk</span>
+              {DOSSIER_TABS.map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  className={`intel-dossier-index-link${activeTab === tab.id ? " is-active" : ""}`}
+                  onClick={() => setActiveTab(tab.id)}
+                >
+                  {tab.label}
+                </button>
+              ))}
             </div>
             <div>
               <strong>Current workspace</strong>

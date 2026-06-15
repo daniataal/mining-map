@@ -1625,22 +1625,43 @@ func (s *Server) getCompanyCommercialProfile(w http.ResponseWriter, r *http.Requ
 		roles = appendCommercialRole(roles, "buyer", "importer")
 	}
 	linkedIntel := s.entityLinkedIntel(r, "company", id, name, commodities, country)
+	assets := s.companyCommercialAssets(r.Context(), id)
+	tradeFlow := s.companyTradeFlowSummary(r, id)
+	contacts := s.companyContacts(r, id)
+	commercialContacts := s.loadCommercialRoleContactBundles(r.Context(), commercialRoleContactInput{
+		Role:         "company_profile",
+		CompanyID:    id,
+		FallbackName: name,
+	})
+	investorExposures := s.entityInvestorExposures(r.Context(), "company", id, 12)
+	chainBundle := buildCommercialChainBundle(commercialChainBundleInput{
+		EntityType:        "company",
+		EntityID:          id,
+		Name:              name,
+		CountryCode:       country,
+		Contacts:          commercialContacts,
+		InvestorExposures: investorExposures,
+		LinkedIntel:       linkedIntel,
+	})
 	writeJSON(w, map[string]any{
-		"id":                 id,
-		"type":               "company",
-		"name":               name,
-		"country_code":       country,
-		"commodities":        commodities,
-		"roles":              roles,
-		"contactability":     map[string]string{"website": website, "phone": phone, "email": email},
-		"asset_counts":       map[string]int{"operator": operatorAssets, "owner": ownerAssets, "owned_vessels": ownedVessels, "operated_vessels": operatedVessels, "import_rows": importRows},
-		"assets":             s.companyCommercialAssets(r.Context(), id),
-		"trade_flow_summary": s.companyTradeFlowSummary(r, id),
-		"contacts":           s.companyContacts(r, id),
-		"linked_intel":       linkedIntel,
-		"confidence_score":   confidence,
-		"raw_source_payload": jsonBlock(raw, "{}"),
-		"evidence_label":     "reported",
+		"id":                      id,
+		"type":                    "company",
+		"name":                    name,
+		"country_code":            country,
+		"commodities":             commodities,
+		"roles":                   roles,
+		"contactability":          map[string]string{"website": website, "phone": phone, "email": email},
+		"asset_counts":            map[string]int{"operator": operatorAssets, "owner": ownerAssets, "owned_vessels": ownedVessels, "operated_vessels": operatedVessels, "import_rows": importRows},
+		"assets":                  assets,
+		"trade_flow_summary":      tradeFlow,
+		"contacts":                contacts,
+		"commercial_contacts":     commercialContacts,
+		"investor_exposures":      investorExposures,
+		"commercial_chain_bundle": chainBundle,
+		"linked_intel":            linkedIntel,
+		"confidence_score":        confidence,
+		"raw_source_payload":      jsonBlock(raw, "{}"),
+		"evidence_label":          "reported",
 	})
 }
 
@@ -1663,22 +1684,51 @@ func (s *Server) getAssetCommercialProfile(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	linkedIntel := s.entityLinkedIntel(r, "asset", id, name, commodities, country)
+	ownershipChain := s.assetOwnershipIntel(r.Context(), id)
+	investorExposures := s.entityInvestorExposures(r.Context(), "asset", id, 12)
+	infrastructureContext := s.assetInfrastructureContext(r.Context(), id, 12)
+	coverageContext, coverageGaps := s.assetCoverageContext(r.Context(), id, 50000)
+	commercialContacts := s.loadCommercialRoleContactBundles(
+		r.Context(),
+		commercialRoleContactInput{Role: "asset_operator", CompanyID: operatorID, FallbackName: operatorName},
+		commercialRoleContactInput{Role: "asset_owner", CompanyID: ownerID, FallbackName: ownerName},
+	)
+	chainBundle := buildCommercialChainBundle(commercialChainBundleInput{
+		EntityType:        "asset",
+		EntityID:          id,
+		Name:              name,
+		CountryCode:       country,
+		AssetType:         assetType,
+		Owner:             map[string]any{"company_id": ownerID, "name": ownerName},
+		Operator:          map[string]any{"company_id": operatorID, "name": operatorName},
+		Contacts:          commercialContacts,
+		OwnershipChain:    ownershipChain,
+		InvestorExposures: investorExposures,
+		Infrastructure:    infrastructureContext,
+		CoverageContext:   coverageContext,
+		CoverageGaps:      coverageGaps,
+		LinkedIntel:       linkedIntel,
+	})
 	writeJSON(w, map[string]any{
-		"id":                 id,
-		"type":               "asset",
-		"name":               name,
-		"asset_type":         assetType,
-		"country_code":       country,
-		"commodities":        commodities,
-		"operator":           map[string]string{"company_id": operatorID, "name": operatorName},
-		"owner":              map[string]string{"company_id": ownerID, "name": ownerName},
-		"roles":              []string{"real_asset"},
-		"ownership_chain":    s.assetOwnershipIntel(r.Context(), id),
-		"investor_exposures": s.entityInvestorExposures(r.Context(), "asset", id, 12),
-		"linked_intel":       linkedIntel,
-		"confidence_score":   confidence,
-		"raw_source":         jsonBlock(raw, "{}"),
-		"evidence_label":     "reported",
+		"id":                      id,
+		"type":                    "asset",
+		"name":                    name,
+		"asset_type":              assetType,
+		"country_code":            country,
+		"commodities":             commodities,
+		"operator":                map[string]string{"company_id": operatorID, "name": operatorName},
+		"owner":                   map[string]string{"company_id": ownerID, "name": ownerName},
+		"roles":                   []string{"real_asset"},
+		"commercial_contacts":     commercialContacts,
+		"ownership_chain":         ownershipChain,
+		"investor_exposures":      investorExposures,
+		"infrastructure_context":  infrastructureContext,
+		"coverage_context":        coverageContext,
+		"commercial_chain_bundle": chainBundle,
+		"linked_intel":            linkedIntel,
+		"confidence_score":        confidence,
+		"raw_source":              jsonBlock(raw, "{}"),
+		"evidence_label":          "reported",
 	})
 }
 
@@ -1732,25 +1782,40 @@ func (s *Server) getVesselCommercialProfile(w http.ResponseWriter, r *http.Reque
 	)
 	contacts := loadVesselCommercialContacts(r.Context(), s.pool, ownerID, operatorID, ownerName, operatorName, ownerProfile)
 	linkedIntel := s.entityLinkedIntel(r, "vessel", id, name, []string{vesselClass, vesselType}, "")
+	chainBundle := buildCommercialChainBundle(commercialChainBundleInput{
+		EntityType:     "vessel",
+		EntityID:       id,
+		Name:           name,
+		VesselClass:    vesselClass,
+		IMO:            imo,
+		MMSI:           mmsi,
+		Owner:          map[string]any{"company_id": ownerID, "name": ownerName},
+		Operator:       map[string]any{"company_id": operatorID, "name": operatorName},
+		Contacts:       contacts,
+		OwnershipIntel: ownershipIntel,
+		NameHistory:    nameHistory,
+		LinkedIntel:    linkedIntel,
+	})
 	writeJSON(w, map[string]any{
-		"id":                  id,
-		"type":                "vessel",
-		"name":                name,
-		"imo":                 imo,
-		"mmsi":                mmsi,
-		"vessel_type":         vesselType,
-		"vessel_class":        vesselClass,
-		"deadweight_tons":     dwt,
-		"owner":               map[string]string{"company_id": ownerID, "name": ownerName},
-		"operator":            map[string]string{"company_id": operatorID, "name": operatorName},
-		"roles":               []string{"shipowner_route_evidence"},
-		"commercial_contacts": contacts,
-		"name_history":        nameHistory,
-		"owner_profile":       ownerProfile,
-		"ownership_intel":     ownershipIntel,
-		"linked_intel":        linkedIntel,
-		"confidence_score":    confidence,
-		"evidence_label":      "reported",
+		"id":                      id,
+		"type":                    "vessel",
+		"name":                    name,
+		"imo":                     imo,
+		"mmsi":                    mmsi,
+		"vessel_type":             vesselType,
+		"vessel_class":            vesselClass,
+		"deadweight_tons":         dwt,
+		"owner":                   map[string]string{"company_id": ownerID, "name": ownerName},
+		"operator":                map[string]string{"company_id": operatorID, "name": operatorName},
+		"roles":                   []string{"shipowner_route_evidence"},
+		"commercial_contacts":     contacts,
+		"commercial_chain_bundle": chainBundle,
+		"name_history":            nameHistory,
+		"owner_profile":           ownerProfile,
+		"ownership_intel":         ownershipIntel,
+		"linked_intel":            linkedIntel,
+		"confidence_score":        confidence,
+		"evidence_label":          "reported",
 	})
 }
 
@@ -2032,6 +2097,9 @@ func (s *Server) profileCargoMovements(ctx context.Context, entityType, id, name
 	if len(out) < limit {
 		out = append(out, s.profileMeridianCargoMovements(ctx, entityType, id, name, limit-len(out))...)
 	}
+	if entityType == "asset" && len(out) < limit {
+		out = append(out, s.profileNearbyMeridianCargoMovements(ctx, id, limit-len(out))...)
+	}
 	return out
 }
 
@@ -2111,68 +2179,253 @@ func (s *Server) profileMeridianCargoMovements(ctx context.Context, entityType, 
 	return out
 }
 
+type meridianCargoScanRow struct {
+	ID                 string
+	VesselName         string
+	IMO                string
+	MMSI               string
+	Product            string
+	LoadPort           string
+	LoadCountry        string
+	DischargePort      string
+	DischargeCountry   string
+	Unit               string
+	Method             string
+	ObservedAt         string
+	Evidence           string
+	ShipperName        string
+	ConsigneeName      string
+	ShipperCompanyID   string
+	ConsigneeCompanyID string
+	VesselID           string
+	VesselClass        string
+	Owner              string
+	Operator           string
+	OwnerCompanyID     string
+	OperatorCompanyID  string
+	OwnerProfile       string
+	Low                float64
+	Best               float64
+	High               float64
+	Confidence         float64
+}
+
+func scanMeridianCargoRow(rows interface{ Scan(dest ...any) error }) (meridianCargoScanRow, bool) {
+	var row meridianCargoScanRow
+	if err := rows.Scan(&row.ID, &row.VesselName, &row.IMO, &row.MMSI, &row.Product, &row.LoadPort, &row.LoadCountry, &row.DischargePort, &row.DischargeCountry,
+		&row.Low, &row.Best, &row.High, &row.Unit, &row.Method, &row.Confidence, &row.ObservedAt, &row.Evidence,
+		&row.ShipperName, &row.ConsigneeName, &row.ShipperCompanyID, &row.ConsigneeCompanyID, &row.VesselID, &row.VesselClass, &row.Owner, &row.Operator, &row.OwnerCompanyID, &row.OperatorCompanyID, &row.OwnerProfile); err != nil {
+		return meridianCargoScanRow{}, false
+	}
+	return row, true
+}
+
 func (s *Server) scanMeridianCargo(ctx context.Context, rows interface{ Scan(dest ...any) error }) map[string]any {
-	var id, vesselName, imo, mmsi, product, loadPort, loadCountry, dischargePort, dischargeCountry, unit, method, observedAt, evidence string
-	var shipperName, consigneeName, shipperCompanyID, consigneeCompanyID, vesselID, vesselClass, owner, operator, ownerCompanyID, operatorCompanyID, ownerProfile string
-	var low, best, high, confidence float64
-	if err := rows.Scan(&id, &vesselName, &imo, &mmsi, &product, &loadPort, &loadCountry, &dischargePort, &dischargeCountry,
-		&low, &best, &high, &unit, &method, &confidence, &observedAt, &evidence,
-		&shipperName, &consigneeName, &shipperCompanyID, &consigneeCompanyID, &vesselID, &vesselClass, &owner, &operator, &ownerCompanyID, &operatorCompanyID, &ownerProfile); err != nil {
+	row, ok := scanMeridianCargoRow(rows)
+	if !ok {
 		return nil
 	}
-	decodedDestination := decodeAISDestination(dischargePort)
+	return s.meridianCargoItem(ctx, row, "meridian_cargo_records", "meridian_cargo_record", "inferred", nil)
+}
+
+func (s *Server) meridianCargoItem(ctx context.Context, row meridianCargoScanRow, source, routeSource, evidenceLabel string, assetContext map[string]any) map[string]any {
+	if evidenceLabel == "" {
+		evidenceLabel = "inferred"
+	}
+	decodedDestination := decodeAISDestination(row.DischargePort)
 	chain := buildCargoCommercialContext(ctx, s.pool, cargoCommercialContextInput{
-		Source:             "meridian_cargo_records",
-		VesselID:           vesselID,
-		VesselName:         vesselName,
-		IMO:                imo,
-		MMSI:               mmsi,
-		VesselClass:        vesselClass,
-		OwnerName:          owner,
-		OperatorName:       operator,
-		OwnerCompanyID:     ownerCompanyID,
-		OperatorCompanyID:  operatorCompanyID,
-		OwnerProfileJSON:   ownerProfile,
-		ShipperName:        shipperName,
-		ConsigneeName:      consigneeName,
-		ShipperCompanyID:   shipperCompanyID,
-		ConsigneeCompanyID: consigneeCompanyID,
-		ProductFamily:      product,
-		LoadPort:           loadPort,
-		LoadCountry:        loadCountry,
-		DischargePort:      dischargePort,
-		DischargeCountry:   dischargeCountry,
-		RouteSource:        "meridian_cargo_record",
-		RouteConfidence:    confidence,
+		Source:             source,
+		VesselID:           row.VesselID,
+		VesselName:         row.VesselName,
+		IMO:                row.IMO,
+		MMSI:               row.MMSI,
+		VesselClass:        row.VesselClass,
+		OwnerName:          row.Owner,
+		OperatorName:       row.Operator,
+		OwnerCompanyID:     row.OwnerCompanyID,
+		OperatorCompanyID:  row.OperatorCompanyID,
+		OwnerProfileJSON:   row.OwnerProfile,
+		ShipperName:        row.ShipperName,
+		ConsigneeName:      row.ConsigneeName,
+		ShipperCompanyID:   row.ShipperCompanyID,
+		ConsigneeCompanyID: row.ConsigneeCompanyID,
+		ProductFamily:      row.Product,
+		LoadPort:           row.LoadPort,
+		LoadCountry:        row.LoadCountry,
+		DischargePort:      row.DischargePort,
+		DischargeCountry:   row.DischargeCountry,
+		RouteSource:        routeSource,
+		RouteConfidence:    row.Confidence,
 		DecodedDestination: decodedDestination,
-		QuantityMethod:     method,
-		EvidenceLabel:      "inferred",
+		QuantityMethod:     row.Method,
+		EvidenceLabel:      evidenceLabel,
 	})
-	routeHint := map[string]any{"source": "meridian_cargo_record", "confidence_score": confidence}
+	routeHint := map[string]any{"source": routeSource, "confidence_score": row.Confidence}
 	if len(decodedDestination) > 0 {
 		routeHint["decoded_destination"] = decodedDestination
 	}
-	return map[string]any{
-		"id":               id,
-		"source":           "meridian_cargo_records",
-		"vessel_id":        vesselID,
-		"vessel_name":      vesselName,
-		"imo":              imo,
-		"mmsi":             mmsi,
-		"vessel_class":     vesselClass,
-		"owner_name":       owner,
-		"operator_name":    operator,
-		"product_family":   product,
-		"load":             map[string]string{"port": loadPort, "country": loadCountry},
-		"discharge":        map[string]string{"port": dischargePort, "country": dischargeCountry},
+	item := map[string]any{
+		"id":               row.ID,
+		"source":           source,
+		"vessel_id":        row.VesselID,
+		"vessel_name":      row.VesselName,
+		"imo":              row.IMO,
+		"mmsi":             row.MMSI,
+		"vessel_class":     row.VesselClass,
+		"owner_name":       row.Owner,
+		"operator_name":    row.Operator,
+		"product_family":   row.Product,
+		"load":             map[string]string{"port": row.LoadPort, "country": row.LoadCountry},
+		"discharge":        map[string]string{"port": row.DischargePort, "country": row.DischargeCountry},
 		"route_hint":       routeHint,
-		"quantity":         map[string]any{"low": low, "best": best, "high": high, "unit": unit, "method": method},
-		"confidence":       confidence,
-		"observed_at":      observedAt,
-		"evidence":         jsonBlock(evidence, "[]"),
-		"evidence_label":   "inferred",
+		"quantity":         map[string]any{"low": row.Low, "best": row.Best, "high": row.High, "unit": row.Unit, "method": row.Method},
+		"confidence":       row.Confidence,
+		"observed_at":      row.ObservedAt,
+		"evidence":         jsonBlock(row.Evidence, "[]"),
+		"evidence_label":   evidenceLabel,
 		"commercial_chain": chain,
 	}
+	if len(assetContext) > 0 {
+		routeHint["asset_context"] = assetContext
+		item["asset_context"] = assetContext
+		item["linkage"] = "nearby_terminal_cluster_context"
+		item["limitations"] = []string{"Cargo record is attached to a nearby terminal-cluster asset, not the selected asset id; use as contextual evidence until exact port-call/voyage linkage is available."}
+		chain["asset_context"] = assetContext
+		chain["limitations"] = item["limitations"]
+		if steps, ok := chain["chain_steps"].([]map[string]any); ok {
+			contextStep := map[string]any{
+				"step":           "nearby_terminal_cluster",
+				"label":          firstNonEmpty(stringFromAny(assetContext["asset_name"]), stringFromAny(assetContext["name"])),
+				"asset_id":       stringFromAny(assetContext["asset_id"]),
+				"asset_type":     stringFromAny(assetContext["asset_type"]),
+				"distance_km":    numberFromAny(assetContext["distance_km"]),
+				"evidence_label": "inferred",
+			}
+			chain["chain_steps"] = append(steps, contextStep)
+		}
+	}
+	return item
+}
+
+func (s *Server) profileNearbyMeridianCargoMovements(ctx context.Context, assetID string, limit int) []map[string]any {
+	if limit <= 0 {
+		return nil
+	}
+	rows, err := s.pool.Query(ctx, `
+		WITH target AS (
+			SELECT id, name, latitude, longitude
+			FROM assets
+			WHERE id::text = $1
+			  AND latitude IS NOT NULL
+			  AND longitude IS NOT NULL
+			LIMIT 1
+		),
+		nearby_assets AS (
+			SELECT
+				a.id,
+				COALESCE(a.name, '') AS asset_name,
+				COALESCE(a.asset_type, '') AS asset_type,
+				COALESCE(a.country_code, '') AS country_code,
+				ROUND((ST_Distance(
+					ST_SetSRID(ST_MakePoint(a.longitude, a.latitude), 4326)::geography,
+					ST_SetSRID(ST_MakePoint(t.longitude, t.latitude), 4326)::geography
+				) / 1000)::numeric, 2)::double precision AS distance_km
+			FROM target t
+			JOIN assets a ON a.id <> t.id
+			WHERE a.latitude IS NOT NULL
+			  AND a.longitude IS NOT NULL
+			  AND COALESCE(a.asset_type, '') IN ('terminal', 'tank_farm', 'storage', 'refinery', 'processing_plant', 'pipeline', 'lng_terminal', 'port')
+			  AND ST_DWithin(
+				ST_SetSRID(ST_MakePoint(a.longitude, a.latitude), 4326)::geography,
+				ST_SetSRID(ST_MakePoint(t.longitude, t.latitude), 4326)::geography,
+				15000
+			  )
+			  AND NOT (
+				lower(COALESCE(a.name, '')) = lower(COALESCE(t.name, ''))
+				AND ST_Distance(
+					ST_SetSRID(ST_MakePoint(a.longitude, a.latitude), 4326)::geography,
+					ST_SetSRID(ST_MakePoint(t.longitude, t.latitude), 4326)::geography
+				) < 1000
+			  )
+		)
+		SELECT
+			mcr.id::text,
+			COALESCE(mcr.vessel_name, ''),
+			COALESCE(mcr.imo, ''),
+			COALESCE(mcr.mmsi, ''),
+			COALESCE(mcr.commodity_family, ''),
+			COALESCE(mcr.load_port_name, ''),
+			COALESCE(mcr.load_country, ''),
+			COALESCE(mcr.discharge_hint, ''),
+			COALESCE(mcr.discharge_country, ''),
+			COALESCE(mcr.volume_low, 0),
+			COALESCE(mcr.volume_best_estimate, 0),
+			COALESCE(mcr.volume_high, 0),
+			COALESCE(mcr.volume_unit, 'bbl'),
+			COALESCE(mcr.volume_method, mcr.recipe, ''),
+			COALESCE(mcr.confidence, 0),
+			COALESCE(mcr.event_date::text, ''),
+			COALESCE(mcr.evidence_chain, '[]'::jsonb)::text,
+			COALESCE(mcr.shipper_name, ''),
+			COALESCE(mcr.consignee_name, ''),
+			COALESCE(mcr.shipper_company_id::text, ''),
+			COALESCE(mcr.consignee_company_id::text, ''),
+			COALESCE(v.id::text, ''),
+			COALESCE(ve.vessel_class, v.vessel_type, ''),
+			COALESCE(ve.owner_name, ''),
+			COALESCE(ve.operator_name, ''),
+			COALESCE(ve.owner_company_id::text, ''),
+			COALESCE(ve.operator_company_id::text, ''),
+			COALESCE(ve.owner_profile, '{}'::jsonb)::text,
+			na.id::text AS context_asset_id,
+			na.asset_name,
+			na.asset_type,
+			na.country_code,
+			na.distance_km
+		FROM nearby_assets na
+		JOIN meridian_cargo_records mcr ON mcr.load_terminal_id = na.id
+		LEFT JOIN vessels v ON (mcr.mmsi <> '' AND v.mmsi = mcr.mmsi) OR (mcr.imo <> '' AND v.imo = mcr.imo)
+		LEFT JOIN LATERAL (
+			SELECT ve.*
+			FROM vessel_enrichment ve
+			WHERE (v.id IS NOT NULL AND ve.vessel_id = v.id)
+			   OR (mcr.mmsi <> '' AND ve.mmsi = mcr.mmsi)
+			   OR (mcr.imo <> '' AND ve.imo = mcr.imo)
+			ORDER BY (ve.vessel_id = v.id) DESC, ve.fetched_at DESC
+			LIMIT 1
+		) ve ON true
+		ORDER BY mcr.event_date DESC NULLS LAST, mcr.confidence DESC, na.distance_km ASC
+		LIMIT $2
+	`, assetID, limit)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	out := []map[string]any{}
+	for rows.Next() {
+		var row meridianCargoScanRow
+		var contextAssetID, contextAssetName, contextAssetType, contextCountry string
+		var distance float64
+		if err := rows.Scan(&row.ID, &row.VesselName, &row.IMO, &row.MMSI, &row.Product, &row.LoadPort, &row.LoadCountry, &row.DischargePort, &row.DischargeCountry,
+			&row.Low, &row.Best, &row.High, &row.Unit, &row.Method, &row.Confidence, &row.ObservedAt, &row.Evidence,
+			&row.ShipperName, &row.ConsigneeName, &row.ShipperCompanyID, &row.ConsigneeCompanyID, &row.VesselID, &row.VesselClass, &row.Owner, &row.Operator, &row.OwnerCompanyID, &row.OperatorCompanyID, &row.OwnerProfile,
+			&contextAssetID, &contextAssetName, &contextAssetType, &contextCountry, &distance); err != nil {
+			continue
+		}
+		assetContext := map[string]any{
+			"asset_id":       contextAssetID,
+			"asset_name":     contextAssetName,
+			"asset_type":     contextAssetType,
+			"country_code":   contextCountry,
+			"distance_km":    distance,
+			"match_method":   "nearby_terminal_cluster_v1",
+			"evidence_label": "inferred",
+		}
+		if item := s.meridianCargoItem(ctx, row, "nearby_meridian_cargo_records", "nearby_terminal_cluster", "inferred", assetContext); item != nil {
+			out = append(out, item)
+		}
+	}
+	return out
 }
 
 func (s *Server) profileImporters(ctx context.Context, entityType, id, name, country string, limit int) []map[string]any {
@@ -2551,6 +2804,218 @@ func (s *Server) entityInvestorExposures(ctx context.Context, entityType, id str
 		})
 	}
 	return out
+}
+
+func (s *Server) assetInfrastructureContext(ctx context.Context, assetID string, limit int) []map[string]any {
+	if limit <= 0 {
+		limit = 12
+	}
+	rows, err := s.pool.Query(ctx, `
+		WITH target AS (
+			SELECT id, name, latitude, longitude
+			FROM assets
+			WHERE id::text = $1
+			  AND latitude IS NOT NULL
+			  AND longitude IS NOT NULL
+			LIMIT 1
+		)
+		SELECT
+			a.id::text,
+			COALESCE(a.name, ''),
+			COALESCE(a.asset_type, ''),
+			COALESCE(a.country_code, ''),
+			COALESCE(a.commodities_supported, ARRAY[]::text[]),
+			COALESCE(op.id::text, ''),
+			COALESCE(op.name, ''),
+			COALESCE(own.id::text, ''),
+			COALESCE(own.name, ''),
+			a.latitude,
+			a.longitude,
+			ROUND((ST_Distance(
+				ST_SetSRID(ST_MakePoint(a.longitude, a.latitude), 4326)::geography,
+				ST_SetSRID(ST_MakePoint(t.longitude, t.latitude), 4326)::geography
+			) / 1000)::numeric, 2)::double precision,
+			COALESCE(a.confidence_score, 0)::double precision
+		FROM target t
+		JOIN assets a ON a.id <> t.id
+		LEFT JOIN companies op ON op.id = a.operator_company_id
+		LEFT JOIN companies own ON own.id = a.owner_company_id
+		WHERE a.latitude IS NOT NULL
+		  AND a.longitude IS NOT NULL
+		  AND COALESCE(a.asset_type, '') IN ('terminal', 'tank_farm', 'storage', 'refinery', 'processing_plant', 'pipeline', 'lng_terminal', 'port')
+		  AND ST_DWithin(
+			ST_SetSRID(ST_MakePoint(a.longitude, a.latitude), 4326)::geography,
+			ST_SetSRID(ST_MakePoint(t.longitude, t.latitude), 4326)::geography,
+			15000
+		  )
+		  AND NOT (
+			lower(COALESCE(a.name, '')) = lower(COALESCE(t.name, ''))
+			AND ST_Distance(
+				ST_SetSRID(ST_MakePoint(a.longitude, a.latitude), 4326)::geography,
+				ST_SetSRID(ST_MakePoint(t.longitude, t.latitude), 4326)::geography
+			) < 1000
+		  )
+		ORDER BY
+			ST_Distance(
+				ST_SetSRID(ST_MakePoint(a.longitude, a.latitude), 4326)::geography,
+				ST_SetSRID(ST_MakePoint(t.longitude, t.latitude), 4326)::geography
+			),
+			COALESCE(a.confidence_score, 0) DESC,
+			a.name
+		LIMIT $2
+	`, assetID, limit)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	out := []map[string]any{}
+	for rows.Next() {
+		var id, name, assetType, country, operatorID, operatorName, ownerID, ownerName string
+		var commodities []string
+		var lat, lng, distance, confidence float64
+		if err := rows.Scan(&id, &name, &assetType, &country, &commodities, &operatorID, &operatorName, &ownerID, &ownerName, &lat, &lng, &distance, &confidence); err != nil {
+			continue
+		}
+		out = append(out, map[string]any{
+			"asset_id":            id,
+			"name":                name,
+			"asset_type":          assetType,
+			"country_code":        country,
+			"commodities":         commodities,
+			"operator_company_id": operatorID,
+			"operator_name":       operatorName,
+			"owner_company_id":    ownerID,
+			"owner_name":          ownerName,
+			"coordinates":         map[string]float64{"latitude": lat, "longitude": lng},
+			"distance_km":         distance,
+			"confidence_score":    confidence,
+			"evidence_label":      "reported",
+			"source":              "madsan_assets_nearby_cluster",
+		})
+	}
+	return out
+}
+
+func (s *Server) assetCoverageContext(ctx context.Context, assetID string, radiusM float64) (map[string]any, []string) {
+	if radiusM <= 0 {
+		radiusM = 50000
+	}
+	var portCalls, meridianCargo, cargoEstimates, nearbyPortCalls, nearbyMeridianCargo, nearbyCargoEstimates, aisNearby, aisNearby7d int
+	_ = s.pool.QueryRow(ctx, `SELECT COUNT(*)::int FROM port_call_visits WHERE asset_id::text = $1`, assetID).Scan(&portCalls)
+	_ = s.pool.QueryRow(ctx, `SELECT COUNT(*)::int FROM meridian_cargo_records WHERE load_terminal_id::text = $1`, assetID).Scan(&meridianCargo)
+	_ = s.pool.QueryRow(ctx, `
+		SELECT COUNT(*)::int
+		FROM cargo_estimates ce
+		JOIN vessels v ON v.id = ce.vessel_id
+		JOIN port_call_visits pc ON pc.mmsi = v.mmsi
+		WHERE pc.asset_id::text = $1
+	`, assetID).Scan(&cargoEstimates)
+	nearbyAssetCTE := `
+		WITH target AS (
+			SELECT id, name, latitude, longitude
+			FROM assets
+			WHERE id::text = $1
+			  AND latitude IS NOT NULL
+			  AND longitude IS NOT NULL
+			LIMIT 1
+		),
+		nearby_assets AS (
+			SELECT a.id
+			FROM target t
+			JOIN assets a ON a.id <> t.id
+			WHERE a.latitude IS NOT NULL
+			  AND a.longitude IS NOT NULL
+			  AND COALESCE(a.asset_type, '') IN ('terminal', 'tank_farm', 'storage', 'refinery', 'processing_plant', 'pipeline', 'lng_terminal', 'port')
+			  AND ST_DWithin(
+				ST_SetSRID(ST_MakePoint(a.longitude, a.latitude), 4326)::geography,
+				ST_SetSRID(ST_MakePoint(t.longitude, t.latitude), 4326)::geography,
+				15000
+			  )
+			  AND NOT (
+				lower(COALESCE(a.name, '')) = lower(COALESCE(t.name, ''))
+				AND ST_Distance(
+					ST_SetSRID(ST_MakePoint(a.longitude, a.latitude), 4326)::geography,
+					ST_SetSRID(ST_MakePoint(t.longitude, t.latitude), 4326)::geography
+				) < 1000
+			  )
+		)
+	`
+	_ = s.pool.QueryRow(ctx, nearbyAssetCTE+`SELECT COUNT(*)::int FROM port_call_visits pc JOIN nearby_assets na ON na.id = pc.asset_id`, assetID).Scan(&nearbyPortCalls)
+	_ = s.pool.QueryRow(ctx, nearbyAssetCTE+`SELECT COUNT(*)::int FROM meridian_cargo_records mcr JOIN nearby_assets na ON na.id = mcr.load_terminal_id`, assetID).Scan(&nearbyMeridianCargo)
+	_ = s.pool.QueryRow(ctx, nearbyAssetCTE+`
+		SELECT COUNT(*)::int
+		FROM cargo_estimates ce
+		JOIN vessels v ON v.id = ce.vessel_id
+		JOIN port_call_visits pc ON pc.mmsi = v.mmsi
+		JOIN nearby_assets na ON na.id = pc.asset_id
+	`, assetID).Scan(&nearbyCargoEstimates)
+	_ = s.pool.QueryRow(ctx, `
+		WITH target AS (
+			SELECT latitude, longitude
+			FROM assets
+			WHERE id::text = $1
+			  AND latitude IS NOT NULL
+			  AND longitude IS NOT NULL
+			LIMIT 1
+		)
+		SELECT COUNT(*)::int
+		FROM target t
+		JOIN ais_positions ap ON ST_DWithin(
+			ST_SetSRID(ST_MakePoint(ap.lon, ap.lat), 4326)::geography,
+			ST_SetSRID(ST_MakePoint(t.longitude, t.latitude), 4326)::geography,
+			$2
+		)
+	`, assetID, radiusM).Scan(&aisNearby)
+	_ = s.pool.QueryRow(ctx, `
+		WITH target AS (
+			SELECT latitude, longitude
+			FROM assets
+			WHERE id::text = $1
+			  AND latitude IS NOT NULL
+			  AND longitude IS NOT NULL
+			LIMIT 1
+		)
+		SELECT COUNT(*)::int
+		FROM target t
+		JOIN ais_positions ap ON ap.ts >= now() - interval '7 days'
+		  AND ST_DWithin(
+			ST_SetSRID(ST_MakePoint(ap.lon, ap.lat), 4326)::geography,
+			ST_SetSRID(ST_MakePoint(t.longitude, t.latitude), 4326)::geography,
+			$2
+		  )
+	`, assetID, radiusM).Scan(&aisNearby7d)
+
+	gaps := []string{}
+	if portCalls == 0 {
+		if nearbyPortCalls > 0 {
+			gaps = append(gaps, "No exact port-call visits are attached to this asset yet; nearby terminal-cluster visits are contextual.")
+		} else {
+			gaps = append(gaps, "No exact port-call visits are attached to this asset yet.")
+		}
+	}
+	if meridianCargo == 0 && cargoEstimates == 0 {
+		if nearbyMeridianCargo > 0 || nearbyCargoEstimates > 0 {
+			gaps = append(gaps, "No exact cargo record is attached to this asset yet; nearby terminal-cluster cargo is contextual until exact port-call/voyage evidence arrives.")
+		} else {
+			gaps = append(gaps, "No cargo record is attached to this asset yet; cargo views are contextual until port-call/voyage evidence arrives.")
+		}
+	}
+	if aisNearby7d == 0 {
+		gaps = append(gaps, "No recent AIS observations within the local radius; treat missing vessel activity as provider coverage, not proof of inactivity.")
+	}
+	return map[string]any{
+		"method":                        "asset_terminal_context_v1",
+		"radius_m":                      radiusM,
+		"port_call_visits":              portCalls,
+		"meridian_cargo_records":        meridianCargo,
+		"cargo_estimates":               cargoEstimates,
+		"nearby_port_call_visits":       nearbyPortCalls,
+		"nearby_meridian_cargo_records": nearbyMeridianCargo,
+		"nearby_cargo_estimates":        nearbyCargoEstimates,
+		"ais_positions_nearby":          aisNearby,
+		"ais_positions_7d":              aisNearby7d,
+		"evidence_label":                "reported",
+	}, gaps
 }
 
 func (s *Server) companyContacts(r *http.Request, companyID string) []map[string]any {

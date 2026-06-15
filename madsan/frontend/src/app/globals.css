@@ -1057,6 +1057,103 @@ button.opportunity-row:hover, button.opportunity-row.selected {
   margin: 7px 0 0; padding-left: 17px; color: var(--muted); font-size: 11px; line-height: 1.45;
 }
 .commercial-risk-list li + li { margin-top: 4px; }
+.commercial-dossier-tabs {
+  display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 12px;
+  padding: 4px; border-radius: 8px;
+  border: 1px solid rgba(51, 65, 85, 0.58); background: rgba(7, 11, 19, 0.52);
+}
+.commercial-dossier-tab {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 6px 9px; border: 0; border-radius: 6px;
+  background: transparent; color: var(--muted);
+  font-size: 11px; font-weight: 600; line-height: 1.2; cursor: pointer;
+}
+.commercial-dossier-tab em {
+  font-style: normal; font-size: 9px; font-weight: 600;
+  padding: 1px 5px; border-radius: 999px;
+  background: rgba(148, 163, 184, 0.12); color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.commercial-dossier-tab.is-active {
+  background: rgba(15, 23, 42, 0.88); color: var(--text);
+  box-shadow: inset 0 0 0 1px rgba(51, 65, 85, 0.72);
+}
+.commercial-dossier-tab.is-active em { color: var(--accent); background: rgba(56, 189, 248, 0.12); }
+.commercial-tab-content {
+  min-width: 0; padding: 10px; border-radius: 8px;
+  border: 1px solid rgba(51, 65, 85, 0.58); background: rgba(7, 11, 19, 0.52);
+}
+.commercial-tab-panel { display: grid; gap: 8px; }
+.commercial-subsection {
+  margin-top: 4px; padding-top: 10px;
+  border-top: 1px dashed rgba(71, 85, 105, 0.55);
+}
+.evidence-label {
+  display: inline-block; padding: 2px 6px; border-radius: 999px;
+  font-size: 9px; font-weight: 700; line-height: 1.2;
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.evidence-label--observed,
+.evidence-label--reported,
+.evidence-label--source-backed {
+  color: #86efac; background: rgba(34, 197, 94, 0.14);
+  border: 1px solid rgba(34, 197, 94, 0.28);
+}
+.evidence-label--inferred,
+.evidence-label--estimated,
+.evidence-label--predicted {
+  color: #fcd34d; background: rgba(245, 158, 11, 0.14);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  font-style: italic;
+}
+.commercial-gap-panel { margin-top: 4px; }
+.commercial-gap-panel > strong {
+  display: block; margin-bottom: 6px; color: var(--muted);
+  font-size: 10px; line-height: 1.2; text-transform: uppercase; letter-spacing: 0.05em;
+}
+.commercial-gap-row {
+  display: flex; flex-wrap: wrap; gap: 5px;
+}
+.commercial-gap-hints {
+  display: grid; gap: 4px; margin-top: 6px;
+}
+.commercial-gap-hints p {
+  margin: 0; color: rgba(148, 163, 184, 0.82);
+  font-size: 10px; line-height: 1.35;
+}
+.commercial-gap {
+  display: inline-block; padding: 3px 7px; border-radius: 999px;
+  border: 1px dashed rgba(148, 163, 184, 0.45);
+  background: rgba(15, 23, 42, 0.45); color: var(--muted);
+  font-size: 10px; line-height: 1.25;
+}
+.commercial-card-lines {
+  display: grid; gap: 4px;
+}
+.commercial-card-lines p {
+  margin: 0; color: var(--muted);
+  font-size: 11px; line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.commercial-empty p { margin: 0; }
+.commercial-empty-unlock {
+  margin-top: 6px !important; color: rgba(148, 163, 184, 0.85) !important;
+  font-size: 10px !important; font-style: italic;
+}
+.commercial-action-row {
+  display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px;
+}
+.commercial-action {
+  padding: 3px 8px; border-radius: 6px;
+  border: 1px solid rgba(71, 85, 105, 0.65);
+  background: rgba(8, 12, 20, 0.55); color: var(--muted);
+  font-size: 10px; line-height: 1.2; cursor: not-allowed; opacity: 0.72;
+}
+.commercial-action--enabled {
+  opacity: 1; cursor: pointer; color: var(--accent);
+  border-color: rgba(56, 189, 248, 0.35); text-decoration: none;
+}
+.commercial-action--enabled:hover { background: rgba(56, 189, 248, 0.08); }
 .intel-dossier-side {
   display: flex; flex-direction: column; gap: 10px; position: sticky; top: 68px;
 }
@@ -1067,11 +1164,18 @@ button.opportunity-row:hover, button.opportunity-row.selected {
 .intel-dossier-side strong {
   display: block; color: var(--text); font-size: 12px; line-height: 1.25; margin-bottom: 8px;
 }
-.intel-dossier-side span {
-  display: block; color: var(--muted); font-size: 11px; line-height: 1.35;
+.intel-dossier-side span,
+.intel-dossier-index-link {
+  display: block; width: 100%; text-align: left;
+  color: var(--muted); font-size: 11px; line-height: 1.35;
   padding: 5px 0; border-top: 1px solid rgba(51, 65, 85, 0.42);
   overflow-wrap: anywhere;
 }
+.intel-dossier-index-link {
+  border: 0; border-top: 1px solid rgba(51, 65, 85, 0.42);
+  background: transparent; cursor: pointer;
+}
+.intel-dossier-index-link.is-active { color: var(--accent); }
 @media (max-width: 980px) {
   .intel-dossier-page-head { align-items: flex-start; flex-direction: column; }
   .intel-dossier-kpis { width: 100%; }

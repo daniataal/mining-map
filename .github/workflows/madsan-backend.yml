@@ -1,0 +1,55 @@
+# MadSan backend CI — Go vet, test, and API binary build.
+# Monorepo path: mining-map/madsan/backend (post-split: use madsan/.github/workflows/ci.yml).
+name: MadSan backend
+
+on:
+  pull_request:
+    paths:
+      - "madsan/backend/**"
+      - "madsan/deploy/Dockerfile.api"
+      - ".github/workflows/madsan-backend.yml"
+  push:
+    branches:
+      - main
+      - master
+      - paperclip2
+    paths:
+      - "madsan/backend/**"
+      - "madsan/deploy/Dockerfile.api"
+      - ".github/workflows/madsan-backend.yml"
+
+concurrency:
+  group: madsan-backend-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Go vet, test, build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: madsan/backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache-dependency-path: madsan/backend/go.sum
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        # Integration tests (//go:build integration) and DATABASE_URL-gated tests are skipped in CI.
+        run: go test ./...
+
+      - name: Build API binary
+        run: CGO_ENABLED=0 go build -o bin/api ./cmd/api
+
+      - name: Upload API artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: madsan-api-linux-amd64
+          path: madsan/backend/bin/api
+          if-no-files-found: error

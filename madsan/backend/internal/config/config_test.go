@@ -118,7 +118,14 @@ func TestDefaultAISSyncWhenAISStreamKeySet(t *testing.T) {
 	// Load() without deploy/.env interference (real deploy/.env may set MADSAN_AIS_SYNC=true).
 	root := t.TempDir()
 	backend := filepath.Join(root, "madsan", "backend")
+	deploy := filepath.Join(root, "madsan", "deploy")
 	if err := os.MkdirAll(backend, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(deploy, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(deploy, ".env"), []byte("# isolated test\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	cwd, err := os.Getwd()

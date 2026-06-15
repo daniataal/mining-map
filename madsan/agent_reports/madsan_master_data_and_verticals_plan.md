@@ -284,6 +284,206 @@ Still needed for the full plan:
 
 JODI Oil is the active foundation. JODI Gas stays deferred until a usable dataset is available.
 
+## Price, Stress, And Profit Layer
+
+This layer explains whether a physical opportunity may be commercially interesting.
+
+It must not mix prices, trade flows, and physical balances into one table.
+
+### Price Tables
+
+Use:
+
+- `market_price_observations`
+- future `freight_cost_curves`
+- future `quality_adjustments`
+- future `landed_margin_snapshots`
+
+`market_price_observations` should hold benchmark observations:
+
+- World Bank Pink Sheet monthly benchmarks
+- EIA daily/monthly WTI, Brent, product, gas, and fuel series
+- gas/LNG benchmarks where open data exists
+- coal/metals benchmarks later for mines/industrial
+
+Recommended World Bank benchmark keys:
+
+- `WB_BRENT`
+- `WB_WTI`
+- `WB_DUBAI`
+- `WB_CRUDE_AVG`
+- `WB_NG_US`
+- `WB_NG_EU`
+- `WB_LNG_JP`
+- `WB_COAL_AUS`
+
+### Market Balance Tables
+
+`market_balance_observations` should hold physical balances only:
+
+- production
+- imports
+- exports
+- refinery intake
+- stock change
+- closing stocks
+- demand
+- unit code
+
+EIA company-level imports belong in `trade_flow_facts`, not `prices`.
+
+### Continuous JODI Stress Logic
+
+The current bucketed `100 / 50 / 0` style logic is not enough for paid intelligence.
+
+Use smooth continuous scoring:
+
+- filter JODI values by the correct physical unit, normally `KBBL` for crude volumes
+- do not treat `CONVBBL` as physical volume
+- for crude oil, use `REFINOBS` as the demand proxy because `TOTDEMO` is often blank or structurally not meaningful for raw crude
+- include stock draws as urgency
+- adjust buyer pressure by import reliance:
+  - `import_reliance = max(0, (refinery_demand - domestic_production) / refinery_demand)`
+- use a saturation curve so major consumers do not all collapse into a flat `100`
+- keep scores explainable with components
+
+Buyer pressure example:
+
+`gross_buyer_needs = refinery_demand + stock_draw`
+
+`base_curve = gross_buyer_needs / (gross_buyer_needs + scale_factor)`
+
+`buyer_pressure = base_curve * import_reliance * 100`
+
+This lowers major producers such as Saudi Arabia, Norway, Kuwait, Canada, and Nigeria as buyer-pressure markets while keeping crude-import-dependent refinery economies such as South Korea, Japan, India, and parts of Europe high.
+
+### Structural Market Stress
+
+Build a physical stress index from:
+
+- production losses versus rolling baseline
+- inventory draws
+- refinery demand
+- import reliance
+- supplier availability
+
+Expose it as:
+
+- `market stress`
+- `supply shock`
+- `inventory draw pressure`
+- `import dependency`
+- `benchmark pressure context`
+
+It should not be sold as a guaranteed price forecast.
+
+Allowed wording:
+
+- `scenario price context`
+- `benchmark pressure`
+- `physical stress indicator`
+- `model-implied pressure band`
+- `not trading advice`
+
+Do not say:
+
+- `guaranteed Brent prediction`
+- `stock buy/sell/short signal`
+- `exact future price`
+
+### Broker Value From Profit Layer
+
+The broker-facing value is not simply charting prices.
+
+The valuable product is:
+
+`physical stress -> real buyer pressure -> real supplier route -> available vessel/open STS lead -> owner/contact path -> benchmark/freight/quality margin context`
+
+This gives brokers a lead with commercial reason, not just a map dot.
+
+## Energy Equity Sensitivity Layer
+
+This is optional and should be framed carefully.
+
+MadSan can use physical market data and geopolitical risk to explain how different public energy companies or ETFs are exposed to oil/gas price scenarios.
+
+It should not issue investment recommendations.
+
+Allowed output:
+
+- `equity sensitivity`
+- `scenario exposure`
+- `upstream beneficiary exposure`
+- `refiner input-cost pressure`
+- `integrated major mixed exposure`
+- `LNG/gas spread exposure`
+- `geopolitical risk sensitivity`
+- `not investment advice`
+
+Not allowed:
+
+- `buy`
+- `sell`
+- `short`
+- `guaranteed stock prediction`
+- `exact tomorrow stock price`
+
+### Inputs
+
+- JODI continuous market stress.
+- EIA spot prices and STEO forecast context.
+- World Bank Pink Sheet benchmark trends.
+- EIA weekly/daily stock and product price series where available.
+- Company segment classification:
+  - upstream producer
+  - downstream refiner
+  - integrated major
+  - LNG carrier/terminal operator
+  - midstream/pipeline
+  - oilfield services
+  - shipping/tanker owner
+- SEC/annual-report production mix and revenue segment data where available.
+- GEM/asset ownership and investor exposure.
+- Sanctions/geopolitical risk flags.
+- Vessel/route disruption indicators.
+
+### Scenario Logic
+
+The system can generate scenario bands:
+
+- crude price up/down pressure
+- gas/LNG spread widening/narrowing
+- refining margin compression/expansion
+- shipping rate pressure
+- geopolitical disruption premium
+- inventory drawdown stress
+
+Examples:
+
+- Upstream producers may benefit from higher crude benchmarks when production is not disrupted.
+- Pure refiners may face input-cost pressure when crude rises faster than product cracks.
+- Integrated majors have mixed exposure because upstream gains can offset downstream pressure.
+- LNG carriers/terminal operators may benefit from wider LNG/gas spreads and rerouting demand.
+- Tanker owners may benefit from route disruption and longer tonne-mile demand, but face sanctions/insurance risk.
+
+### User Surface
+
+Recommended future API:
+
+- `GET /api/intel/equity-sensitivity`
+
+Recommended future tables:
+
+- `public_company_energy_profiles`
+- `equity_price_observations`
+- `equity_sensitivity_snapshots`
+
+User-facing card:
+
+`Company/ticker -> segment exposure -> physical stress driver -> likely earnings pressure direction -> confidence -> source evidence`
+
+This is a research/intelligence product. It should not be positioned as trading advice.
+
 ## Implementation Matrix
 
 This matrix separates what is already built from what is only planned.
@@ -301,6 +501,7 @@ This matrix separates what is already built from what is only planned.
 - JODI Oil market pressure foundation.
 - GEM oil/gas/LNG foundation.
 - Market benchmark price context.
+- Initial price-context scoring.
 - Cargo estimates from AIS/draft/DWT logic.
 - Vessel owner/operator enrichment.
 - Company/contact bundles from normalized contacts and raw payloads.
@@ -313,10 +514,16 @@ This matrix separates what is already built from what is only planned.
 ### Planned But Not Fully Built
 
 - EIA company-level imports as full buyer/importer history.
+- World Bank Pink Sheet adapter and benchmark normalization.
 - UN Comtrade and Eurostat corridor flow adapters.
 - DOE crude assays and EIA crude quality adapters.
 - UNCTAD/OECD transport cost adapter.
 - GLEIF, SEC EDGAR, and sanctions enrichment.
+- Continuous JODI stress scoring for crude/products.
+- Production-adjusted buyer pressure.
+- Structural market stress index.
+- Energy equity sensitivity layer.
+- Public-company segment exposure profiles.
 - Freight cost curves.
 - Quality/refining adjustment curves.
 - Landed margin snapshots.
@@ -362,6 +569,8 @@ Core algorithms:
 - Risk Discount.
 - Commercial STS Prediction.
 - Open-To-STS Vessel Lead Score.
+- Continuous Market Stress Score.
+- Landed Margin Score.
 
 ### Investor Control Engine
 
@@ -530,6 +739,228 @@ User wording:
 - `commercial manager to verify`
 - `buyer candidate`
 - never `confirmed cargo owner` unless there is source-backed title/import evidence
+
+### Broker Alpha Engine
+
+This is the additional high-value broker product.
+
+Output:
+
+`where pressure exists + who needs product + who can supply + what vessel/cargo is available + who to contact + why margin may exist`
+
+Inputs:
+
+- JODI continuous stress scores
+- Pink Sheet and EIA benchmark context
+- EIA importer/buyer history
+- GEM real assets and ownership
+- AIS/open-to-STS vessel leads
+- cargo/voyage chain engine
+- owner/operator/manager contacts
+- sanctions/risk context
+
+Broker-facing cards:
+
+- `Urgent buyer market`
+- `Replacement supplier route`
+- `Open vessel near demand zone`
+- `STS watch lead`
+- `Investor-controlled lane`
+- `Supply shock alert`
+- `Contact path`
+- `Margin context`
+
+This is potentially the biggest extra benefit for brokers because it turns macro data into a ranked actionable lead:
+
+`KR crude buyer pressure high -> alternative supplier route available -> tanker/open STS lead nearby -> operator/contact path available -> benchmark spread supports outreach`
+
+This should be sold as intelligence and lead generation, not as investment advice or guaranteed commodity-price prediction.
+
+### Additional Broker Differentiators
+
+These are the extra insight products that should remain in the roadmap because they create broker-grade value beyond a normal map, supplier directory, or vessel tracker.
+
+#### Counterparty Intent Score
+
+Purpose:
+
+Identify who is most likely to act soon, not just who exists.
+
+Inputs:
+
+- buyer import dependence
+- JODI demand, refinery intake, stock draw, and import pressure
+- recent or recurring import history
+- open vessels and cargo candidates near the buyer market
+- price/benchmark stress
+- procurement/importer evidence
+- sanctions and route risk
+
+Output:
+
+`counterparty -> likely need/supply action -> product -> urgency -> evidence -> contact path`
+
+Broker value:
+
+This turns "there is a refinery" into "this buyer market likely needs product, here is why, here is who to contact first."
+
+#### Chokepoint And Route Disruption Index
+
+Purpose:
+
+Detect when a route becomes commercially stressed because vessels are delayed, avoiding a chokepoint, loitering offshore, or shifting lanes.
+
+Inputs:
+
+- AIS density and speed changes near Hormuz, Suez, Bab el-Mandeb, Bosporus, Gibraltar, Panama, Singapore, Malta, Fujairah, Lome, Kalamata, and other strategic zones
+- port congestion and OPL loitering
+- route deviations and ETA slippage
+- sanctions/geopolitical risk flags
+- open tonnage by vessel class
+
+Output:
+
+`route/chokepoint -> disruption signal -> affected products -> buyer/supplier markets -> vessel availability -> risk discount`
+
+Broker value:
+
+Shows where buyers may need replacement supply, where vessels become scarce, and where STS or rerouting opportunities become more valuable.
+
+#### Tonne-Mile And Open-Tonnage Pressure
+
+Purpose:
+
+Estimate freight and vessel availability pressure from physical behavior, before paid freight indices are available.
+
+Inputs:
+
+- vessel class supply in a region
+- laden/ballast/open-to-STS candidates
+- route length changes
+- port dwell and queue time
+- bunker proxy and benchmark fuel prices
+- repeated lane demand
+
+Output:
+
+`market/route -> vessel class -> open tonnage -> tonne-mile pressure -> freight assumption -> confidence`
+
+Broker value:
+
+Helps brokers understand whether the opportunity is commercially reachable or likely killed by vessel scarcity/freight cost.
+
+#### Refinery Feedstock Fit
+
+Purpose:
+
+Match a real crude supplier to a real buyer by quality compatibility, not only by country/product label.
+
+Inputs:
+
+- DOE crude assays and EIA crude quality where available
+- API gravity, sulfur, grade family, and crude blend
+- refinery configuration/capability when available
+- historical crude origins imported by the buyer market
+- price differential and landed margin context
+
+Output:
+
+`supplier crude -> quality class -> compatible refinery/buyer market -> adjustment/penalty -> confidence`
+
+Broker value:
+
+This is stronger than "Canada can sell to Rotterdam" because it can say "this buyer historically takes similar quality, this alternative supplier may fit, and the spread is worth checking."
+
+#### Terminal And Tank Stress
+
+Purpose:
+
+Infer where tanks and terminals may be filling, drawing, or becoming commercially constrained.
+
+Inputs:
+
+- tank farm/terminal assets
+- connected pipelines/refineries
+- recent vessel calls and cargo estimates
+- JODI closing stocks and stock change
+- EIA storage where available
+- berth/queue behavior
+
+Output:
+
+`terminal/tank cluster -> likely product family -> inventory/stress direction -> linked buyers/suppliers -> confidence`
+
+Broker value:
+
+Turns static tank farms into a live commercial clue: who may be long, short, congested, or ready for movement.
+
+#### Repeat Lane Relationship Graph
+
+Purpose:
+
+Detect durable commercial relationships from repeated vessel, terminal, country, product, and counterparty behavior.
+
+Inputs:
+
+- repeated port calls and voyages
+- repeated load/discharge patterns
+- vessel owner/operator history
+- terminal owner/operator
+- import records and procurement awards
+- company contact and registry evidence
+
+Output:
+
+`counterparty A -> repeated lane -> counterparty/market B -> product -> recurrence -> evidence -> contactability`
+
+Broker value:
+
+This helps users discover real trading behavior, not one-off noise.
+
+#### Ownership Change And Vessel Identity Watch
+
+Purpose:
+
+Expose changes that often matter commercially: previous vessel names, previous managers, beneficial owner candidates, flag changes, and opaque ownership shifts.
+
+Inputs:
+
+- current vessel owner/operator/manager
+- previous names already stored
+- registry/manual check pivots
+- ShipVault-style ownership validation when available
+- sanctions/risk flags
+- AIS gaps and behavior anomalies
+
+Output:
+
+`vessel/company -> current control -> previous identity/control clues -> risk -> verification action`
+
+Broker value:
+
+Prevents users from trusting a vessel or operator at face value and gives them a clean verification path.
+
+#### Broker Outreach Pack
+
+Purpose:
+
+Package an opportunity into an action-ready lead without pretending unverified contacts are confirmed decision makers.
+
+Inputs:
+
+- supplier/buyer/owner/operator chain
+- company contacts and source URLs
+- vessel manager/operator contacts
+- cargo/market/price rationale
+- risk and verification gaps
+
+Output:
+
+`who to contact -> why now -> what evidence supports it -> what to verify -> suggested outreach questions`
+
+Broker value:
+
+This becomes a paid workflow: the user does not just see intelligence, they get a clean next action and a verification checklist.
 
 ### Mines/Industrial Chain Engine
 
