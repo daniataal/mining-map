@@ -1,0 +1,44 @@
+# MadSan V2 — production Caddy with automatic TLS (Let's Encrypt)
+#
+# Before use:
+#   1. Replace madsan.example.com with your public hostname (DNS A/AAAA → this VM).
+#   2. Open inbound TCP 80 and 443 on the VM / security group (ACME HTTP-01 + HTTPS).
+#   3. Set deploy/.env:
+#        NEXT_PUBLIC_API_URL=https://madsan.example.com
+#        MADSAN_CADDY_HTTP=80          # keep :80 for ACME + HTTP→HTTPS redirect
+#   4. Mount this file instead of deploy/Caddyfile in docker-compose.prod.yml caddy service:
+#        volumes:
+#          - ./Caddyfile.prod.tls.example:/etc/caddy/Caddyfile:ro
+#          - madsan_caddy_data:/data
+#          - madsan_caddy_config:/config
+#      (add named volumes madsan_caddy_data / madsan_caddy_config under volumes: if not present)
+#   5. Redeploy: docker compose -f madsan/deploy/docker-compose.yml \
+#        -f madsan/deploy/docker-compose.prod.yml --profile proxy up -d caddy
+#
+# Let's Encrypt: Caddy obtains and renews certs automatically on first successful start.
+# Logs: docker compose … logs -f caddy  (look for "certificate obtained" or ACME errors)
+#
+# Rollback to HTTP-only: remount deploy/Caddyfile and drop TLS volume mounts.
+
+madsan.example.com {
+	encode gzip
+
+	handle /api/core/ws {
+		reverse_proxy madsan-api:8080
+	}
+	handle /api/* {
+		reverse_proxy madsan-api:8080
+	}
+	handle /tiles/* {
+		reverse_proxy madsan-api:8080
+	}
+	handle /health* {
+		reverse_proxy madsan-api:8080
+	}
+	handle {
+		reverse_proxy madsan-frontend:3000
+	}
+}
+
+# Optional: redirect bare HTTP on :80 to HTTPS (Caddy also serves ACME on :80 for the site block above).
+# If you bind only :443, ensure MADSAN_CADDY_HTTP maps host 80 for ACME as in docker-compose.prod.yml.

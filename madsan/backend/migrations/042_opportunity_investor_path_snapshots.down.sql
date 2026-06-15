@@ -1,0 +1,7 @@
+DROP INDEX IF EXISTS idx_opportunity_investor_paths_payload;
+DROP INDEX IF EXISTS idx_opportunity_investor_paths_companies;
+DROP INDEX IF EXISTS idx_opportunity_investor_paths_assets;
+DROP INDEX IF EXISTS idx_opportunity_investor_paths_investor;
+DROP INDEX IF EXISTS idx_opportunity_investor_paths_filters;
+DROP INDEX IF EXISTS idx_opportunity_investor_paths_score;
+DROP TABLE IF EXISTS opportunity_investor_path_snapshots;

@@ -1,0 +1,50 @@
+# MadSan frontend CI — install, typecheck, and production build.
+# Lint is omitted until ESLint is configured (next lint prompts interactively today).
+name: MadSan frontend
+
+on:
+  pull_request:
+    paths:
+      - "madsan/frontend/**"
+      - "madsan/deploy/Dockerfile.frontend"
+      - ".github/workflows/madsan-frontend.yml"
+  push:
+    branches:
+      - main
+      - master
+      - paperclip2
+    paths:
+      - "madsan/frontend/**"
+      - "madsan/deploy/Dockerfile.frontend"
+      - ".github/workflows/madsan-frontend.yml"
+
+concurrency:
+  group: madsan-frontend-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Typecheck and build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: madsan/frontend
+    env:
+      NEXT_PUBLIC_API_URL: http://localhost:8088
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: madsan/frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Production build
+        run: npm run build

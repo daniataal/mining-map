@@ -1,0 +1,196 @@
+"use client";
+
+import Link from "next/link";
+import AppShell from "@/components/AppShell";
+import AuthGate from "@/components/auth/AuthGate";
+import { useAuth } from "@/contexts/AuthContext";
+import { authFetchOpts } from "@/lib/auth";
+import { canUse, FEATURE } from "@/lib/entitlements";
+import { API_BASE } from "@/lib/layers";
+import { useState } from "react";
+
+const fetchOpts = authFetchOpts;
+
+type SubmitResult = {
+  status?: string;
+  confidence?: string;
+  error?: string;
+  fallback?: boolean;
+};
+
+const inputStyle: React.CSSProperties = {
+  padding: 8,
+  background: "var(--panel)",
+  border: "1px solid var(--border)",
+  color: "var(--text)",
+};
+
+export default function PortalPage() {
+  const { me, refresh } = useAuth();
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<SubmitResult | null>(null);
+  const [docPlaceholder, setDocPlaceholder] = useState("");
+
+  const canSubmit = canUse(me, FEATURE.supplierPortal);
+
+  async function submitOffer(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setLoading(true);
+    setResult(null);
+    const fd = new FormData(e.currentTarget);
+    const companyName = String(fd.get("company_name") ?? "").trim();
+    const commodity = String(fd.get("commodity") ?? "").trim();
+    const notes = String(fd.get("notes") ?? "").trim();
+    const docNote = docPlaceholder ? `documents_placeholder: ${docPlaceholder}` : "documents_placeholder: none selected";
+    const combinedNotes = [notes, docNote].filter(Boolean).join(" · ");
+
+    let res: Response;
+    try {
+      res = await fetch(`${API_BASE}/api/portal/offers`, {
+        ...fetchOpts,
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          company_name: companyName,
+          commodity,
+          notes: combinedNotes,
+        }),
+      });
+    } catch {
+      setResult({
+        fallback: true,
+        error:
+          "Supplier portal API is unreachable. Ask an analyst to enqueue your offer via Admin → review queue (manual_review_queue).",
+      });
+      setLoading(false);
+      return;
+    }
+
+    if (res.status === 401) {
+      await refresh();
+      setResult({ error: "Session expired — sign in again." });
+      setLoading(false);
+      return;
+    }
+
+    if (res.status === 403) {
+      setResult({ error: "Your plan does not include supplier portal submissions." });
+      setLoading(false);
+      return;
+    }
+
+    if (res.status === 404 || res.status === 405) {
+      setResult({
+        fallback: true,
+        error:
+          "Supplier portal submit API is not deployed yet. Submit via Admin console enqueue or ask ops to add a manual_review_queue row.",
+      });
+      setLoading(false);
+      return;
+    }
+
+    if (!res.ok) {
+      setResult({ error: await res.text() });
+      setLoading(false);
+      return;
+    }
+
+    const data = (await res.json()) as SubmitResult;
+    setResult(data);
+    setLoading(false);
+    e.currentTarget.reset();
+    setDocPlaceholder("");
+  }
+
+  return (
+    <AppShell maxWidth={640}>
+      <AuthGate>
+      <h1 style={{ marginTop: 0 }}>Supplier portal</h1>
+      <p style={{ color: "var(--muted)" }}>
+        Submit commodity offers for analyst review. Submissions enqueue{" "}
+        <code style={{ fontSize: 11 }}>manual_review_queue</code> with low confidence until verified.
+      </p>
+
+        {!canSubmit && (
+          <p style={{ color: "var(--warn)", marginBottom: "1rem" }}>
+            Your plan does not include supplier portal submissions.
+          </p>
+        )}
+        <form onSubmit={submitOffer} style={{ display: "grid", gap: "0.75rem" }}>
+          <label style={{ display: "grid", gap: 4 }}>
+            company name
+            <input name="company_name" required placeholder="Acme Trading FZE" style={inputStyle} />
+          </label>
+          <label style={{ display: "grid", gap: 4 }}>
+            commodity
+            <input name="commodity" required placeholder="VLSFO, EN590, gold concentrate…" style={inputStyle} />
+          </label>
+          <label style={{ display: "grid", gap: 4 }}>
+            supporting documents
+            <input
+              type="file"
+              multiple
+              disabled
+              onChange={(ev) => {
+                const names = Array.from(ev.target.files ?? [])
+                  .map((f) => f.name)
+                  .join(", ");
+                setDocPlaceholder(names);
+              }}
+              style={{ ...inputStyle, opacity: 0.6, cursor: "not-allowed" }}
+            />
+            <span style={{ fontSize: 11, color: "var(--muted)" }}>
+              Upload placeholder — file storage not wired yet. Note filenames in notes or email docs to your analyst;
+              submission still enqueues manual review without attachments.
+            </span>
+          </label>
+          <label style={{ display: "grid", gap: 4 }}>
+            notes (optional)
+            <textarea
+              name="notes"
+              rows={3}
+              placeholder="Quantity, location, incoterm, contact…"
+              style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit" }}
+            />
+          </label>
+          <button
+            type="submit"
+            disabled={loading || !canSubmit}
+            style={{ padding: 10, background: "var(--accent)", color: "#000", border: 0, fontWeight: 600 }}
+          >
+            {loading ? "Submitting…" : "Submit for review"}
+          </button>
+        </form>
+
+        {result && (
+        <div style={{ marginTop: "1.5rem" }}>
+          {result.error && (
+            <p style={{ color: result.fallback ? "var(--warn)" : "#f87171" }}>
+              {result.error}
+              {result.fallback && (
+                <>
+                  {" "}
+                  <Link href="/admin">Admin console</Link>
+                </>
+              )}
+            </p>
+          )}
+          {result.status === "submitted" && (
+            <p>
+              <span className="badge partial">Queued for analyst review</span>
+              {result.confidence && (
+                <span style={{ color: "var(--muted)", marginLeft: 8 }}>{result.confidence}</span>
+              )}
+            </p>
+          )}
+        </div>
+        )}
+
+      <p className="disclaimer">
+        Supplier submissions are intelligence signals, not verified listings. Analysts resolve items in the admin review
+        queue before dossier promotion.
+      </p>
+      </AuthGate>
+    </AppShell>
+  );
+}

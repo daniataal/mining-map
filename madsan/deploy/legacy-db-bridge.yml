@@ -1,0 +1,6 @@
+# Temporary read-only bridge: expose legacy mining-db on host :5434 for ETL scripts.
+# Usage: docker compose -f ../../docker-compose.yml -f legacy-db-bridge.yml up -d db
+services:
+  db:
+    ports:
+      - "5434:5432"

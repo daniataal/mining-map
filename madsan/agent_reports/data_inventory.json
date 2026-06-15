@@ -1,0 +1,39 @@
+{
+  "generated_at": "2026-06-09",
+  "database": "mining_db",
+  "note": "Phase 0 inventory — no writes to madsan master tables until reviewed",
+  "table_counts": {
+    "map_feature_popup_payload": 442566,
+    "petroleum_osm_features": 303745,
+    "licenses": 77369,
+    "oil_commercial_events": 57144,
+    "entity_relationships": 23489,
+    "oil_ais_positions": 18201,
+    "oil_sts_events": 17124,
+    "oil_vessels": 9593,
+    "oil_companies": 5074,
+    "oil_port_calls": 844,
+    "meridian_cargo_records": 470,
+    "oil_trade_flows": 306,
+    "core_assets": 128,
+    "core_organizations": 139,
+    "core_source_records": 125,
+    "oil_terminals": 0,
+    "storage_terminal_display": 0
+  },
+  "seed_files": [
+    "data/bunker_fuel_suppliers_seed.json",
+    "data/storage_terminals_seed.json",
+    "data/storage_terminals_gov_seed.json",
+    "data/oil_products_licenses_seed.json",
+    "data/port_authority_directories.json"
+  ],
+  "known_mismatches": [
+    "oil_terminals=0 vs sync-status ~19,960 storage records — promote storage_terminal_display + seeds into core_assets"
+  ],
+  "coverage_gaps": [
+    "Persian Gulf / Hormuz AIS — limited provider coverage",
+    "No bunker price feed (supplier register only)",
+    "Metals smelters/refineries sparse vs licenses"
+  ]
+}

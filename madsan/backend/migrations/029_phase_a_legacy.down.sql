@@ -1,0 +1,10 @@
+DROP INDEX IF EXISTS uq_deals_legacy_broker_pack;
+DROP INDEX IF EXISTS uq_contacts_legacy;
+DROP INDEX IF EXISTS uq_prices_eia_spot_symbol_period;
+DROP INDEX IF EXISTS uq_prices_eia_historic_legacy;
+DROP INDEX IF EXISTS uq_voyages_legacy_port_call;
+DROP INDEX IF EXISTS uq_core_signals_commercial_fingerprint;
+DROP INDEX IF EXISTS uq_core_signals_sts_legacy;
+DROP INDEX IF EXISTS uq_core_signals_legacy_port_call;
+DROP TABLE IF EXISTS sts_zones;
+ALTER TABLE contacts DROP COLUMN IF EXISTS metadata;

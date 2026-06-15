@@ -103,6 +103,8 @@ jobs:
           chmod +x scripts/render_backend_env.sh scripts/render_backend_env_test.sh
           ./scripts/render_backend_env_test.sh
 
+  # Legacy mining-viz deploy job (manual workflow_dispatch only).
+  # MadSan uses MADSAN_DEPLOY_* secrets via madsan-deploy.yml — not REMOTE_* here.
   # Deploy job — required GitHub secrets (repository Settings → Secrets):
   #   DOCKER_USERNAME, DOCKER_PASSWORD — registry push (build job)
   #   REMOTE_HOST, REMOTE_USER, REMOTE_SSH_KEY — SSH to production VM
@@ -341,5 +343,5 @@ jobs:
             echo "CSV auto-import status: $IMPORT_STATUS"
           fi
           
-          # Deep Clean
+          # Legacy stack cleanup (aggressive — MadSan deploy uses scoped prune in madsan-deploy.yml)
           sudo docker image prune -af

@@ -1,0 +1,164 @@
+# MadSan V2 stack — default: db + api + worker + scheduler + frontend
+# Live AIS (requires AISSTREAM_API_KEY): docker compose --profile ais up -d
+# Optional reverse proxy: docker compose --profile proxy up -d
+#
+# Hybrid dev (DB only in Docker, API/UI on host): docker compose up -d madsan-db
+# Full stack: ./madsan/scripts/compose_up.sh
+
+x-backend-env: &backend-env
+  DATABASE_URL: postgresql://postgres:${MADSAN_DB_PASSWORD:-password}@madsan-db:5432/madsan_db?sslmode=disable
+  # deploy/.env LEGACY_DATABASE_URL (127.0.0.1) is for hybrid dev on the host only.
+  # Containers reach host-published mining-db via host.docker.internal — do not pass .env through.
+  LEGACY_DATABASE_URL: ${MADSAN_DOCKER_LEGACY_DATABASE_URL:-postgresql://postgres:password@host.docker.internal:5434/mining_db?sslmode=disable}
+  MADSAN_JWT_SECRET: ${MADSAN_JWT_SECRET:-change-me}
+  # Legacy 2-hop AIS sync; Go defaults MADSAN_AIS_SYNC=false when AISSTREAM_API_KEY is set.
+  MADSAN_AIS_SYNC: ${MADSAN_AIS_SYNC:-}
+  AISSTREAM_API_KEY: ${AISSTREAM_API_KEY:-}
+  MADSAN_AIS_SYNC_SEC: ${MADSAN_AIS_SYNC_SEC:-30}
+  MADSAN_LEGACY_PYTHON: ${MADSAN_LEGACY_PYTHON:-false}
+  MADSAN_RAW_DIR: /raw
+  MADSAN_GEM_DATA_DIR: /data/gem
+  EIA_API_KEY: ${EIA_API_KEY:-}
+  OPENSANCTIONS_API_KEY: ${OPENSANCTIONS_API_KEY:-}
+  COMTRADE_API_KEY: ${COMTRADE_API_KEY:-}
+  COURTLISTENER_API_KEY: ${COURTLISTENER_API_KEY:-}
+  GROQ_API_KEY: ${GROQ_API_KEY:-}
+  OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+  MADSAN_SHIPVAULT_ENABLED: ${MADSAN_SHIPVAULT_ENABLED:-true}
+  SHIPVAULT_BEARER_TOKEN: ${SHIPVAULT_BEARER_TOKEN:-}
+  SHIPVAULT_REFRESH_TOKEN: ${SHIPVAULT_REFRESH_TOKEN:-}
+  SHIPVAULT_SESSION_JSON: ${SHIPVAULT_SESSION_JSON:-}
+  # Host IDE proxies (e.g. 127.0.0.1:53179) break SEC/EIA inside containers — force direct egress.
+  HTTP_PROXY: ""
+  HTTPS_PROXY: ""
+  http_proxy: ""
+  https_proxy: ""
+  NO_PROXY: "*"
+
+x-host-gateway: &host-gateway
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+
+services:
+  madsan-db:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${MADSAN_DB_PASSWORD:-password}
+      POSTGRES_DB: madsan_db
+    volumes:
+      - madsan_postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d madsan_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  madsan-api:
+    build:
+      context: ../backend
+      dockerfile: ../deploy/Dockerfile.api
+    environment:
+      <<: *backend-env
+      MADSAN_API_ADDR: ":8080"
+      MADSAN_RUN_MIGRATIONS: "true"
+    ports:
+      - "8088:8080"
+    depends_on:
+      madsan-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+    <<: *host-gateway
+
+  madsan-worker:
+    build:
+      context: ../backend
+      dockerfile: ../deploy/Dockerfile.api
+    command: ["/app/worker"]
+    environment:
+      <<: *backend-env
+      MADSAN_ETL_DIR: /etl
+    volumes:
+      - ../raw:/raw:ro
+      - ../data/gem:/data/gem:ro
+      - ../etl:/etl:ro
+    depends_on:
+      madsan-db:
+        condition: service_healthy
+      madsan-api:
+        condition: service_healthy
+    restart: unless-stopped
+    <<: *host-gateway
+
+  madsan-scheduler:
+    build:
+      context: ../backend
+      dockerfile: ../deploy/Dockerfile.api
+    command: ["/app/scheduler"]
+    environment:
+      <<: *backend-env
+    volumes:
+      - ../raw:/raw:ro
+      - ../data/gem:/data/gem:ro
+    depends_on:
+      madsan-db:
+        condition: service_healthy
+    restart: unless-stopped
+    <<: *host-gateway
+
+  madsan-ais-ingest:
+    profiles: ["ais"]
+    build:
+      context: ../backend
+      dockerfile: ../deploy/Dockerfile.api
+    command: ["/app/ais-ingest"]
+    environment:
+      <<: *backend-env
+      MADSAN_RUN_MIGRATIONS: "false"
+    depends_on:
+      madsan-db:
+        condition: service_healthy
+    restart: unless-stopped
+    <<: *host-gateway
+
+  madsan-frontend:
+    build:
+      context: ../frontend
+      dockerfile: ../deploy/Dockerfile.frontend
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8088}
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8088}
+    ports:
+      - "3001:3000"
+    depends_on:
+      madsan-api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  caddy:
+    profiles: ["proxy"]
+    image: caddy:2-alpine
+    ports:
+      - "9080:80"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      madsan-api:
+        condition: service_healthy
+      madsan-frontend:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  madsan_postgres_data:
+    name: madsan_postgres_data
