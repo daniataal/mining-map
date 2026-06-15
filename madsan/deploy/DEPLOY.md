@@ -4,6 +4,65 @@ Standalone checkout path on the prod VM: **`/opt/madsan/`** (not `/opt/mining-ma
 
 While MadSan still lives in the `mining-map` monorepo, clone the **full monorepo** to `/opt/madsan` and use compose paths under `madsan/deploy/`. After repo split, the same directory holds a MadSan-only checkout with `deploy/` at the repo root.
 
+## Release pipeline (full chain)
+
+Push to `main` / `master` / `paperclip2` with changes under `madsan/**` or `.github/workflows/madsan-*`:
+
+```mermaid
+flowchart TB
+  subgraph trigger [Push to main with madsan changes]
+    PUSH[git push]
+  end
+
+  subgraph ci [Stage 1 — CI gates parallel]
+    BE[MadSan backend<br/>go vet test build]
+    FE[MadSan frontend<br/>typecheck build]
+    DK[MadSan Docker validate<br/>compose config + build no push]
+  end
+
+  subgraph publish [Stage 2 — Build and push linux/arm64]
+    PUB[MadSan Docker publish]
+    API_IMG["dannyatalla/madsan-api<br/>latest vN short_sha"]
+    FE_IMG["dannyatalla/madsan-frontend<br/>latest vN short_sha"]
+  end
+
+  subgraph deploy [Stage 3 — SSH VM deploy]
+    DEP[MadSan deploy]
+    VM["docker compose pull + up<br/>IMAGE_TAG=vN"]
+    HC[Health: db api worker scheduler frontend caddy + edge /health]
+  end
+
+  PUSH --> BE
+  PUSH --> FE
+  PUSH --> DK
+  DK -->|workflow_run success| PUB
+  PUB --> API_IMG
+  PUB --> FE_IMG
+  PUB -->|workflow_run success| DEP
+  DEP --> VM --> HC
+```
+
+| Stage | Workflow file | What it does |
+|-------|---------------|--------------|
+| 1a | `.github/workflows/madsan-backend.yml` | CI gate only — **no Docker image** |
+| 1b | `.github/workflows/madsan-frontend.yml` | CI gate only — **no Docker image** |
+| 1c | `.github/workflows/madsan-docker.yml` | Validate compose YAML; build API + frontend locally (`push: false`) |
+| 2 | `.github/workflows/madsan-publish.yml` | Build + push to Docker Hub (`DOCKER_USERNAME` / `DOCKER_PASSWORD`) |
+| 3 | `.github/workflows/madsan-deploy.yml` | SSH to VM (`REMOTE_*`); stop legacy stack; `compose pull` + `up`; health checks |
+
+Manual runs: `workflow_dispatch` on **MadSan Docker publish** or **MadSan deploy** (choose ref and `IMAGE_TAG`).
+
+### Images pushed vs compose services
+
+| Registry image | Built from | Compose service(s) | Notes |
+|----------------|------------|-------------------|--------|
+| `dannyatalla/madsan-api` | `madsan/deploy/Dockerfile.api` | `madsan-api`, `madsan-worker`, `madsan-scheduler`, `madsan-ais-ingest` | One image; different `command` per service (`/app/api`, `/app/worker`, `/app/scheduler`, `/app/ais-ingest`) |
+| `dannyatalla/madsan-frontend` | `madsan/deploy/Dockerfile.frontend` | `madsan-frontend` | `NEXT_PUBLIC_API_URL` baked at publish |
+| `postgis/postgis:16-3.4` | — (official) | `madsan-db` | Pulled on VM; not built in CI |
+| `caddy:2-alpine` | — (official) | `caddy` | `--profile proxy`; not built in CI |
+
+Prod overlay (`docker-compose.prod.yml`) sets `IMAGE_TAG` (default `latest`; auto deploy uses `v<publish-run-number>`).
+
 Automated deploy: **`.github/workflows/madsan-deploy.yml`** (repo root).
 
 ## GitHub secrets (repository Settings → Secrets)
@@ -115,7 +174,7 @@ Install backup cron (optional): `madsan/scripts/install_backup_cron.sh`
 
 | Trigger | What happens |
 |---------|----------------|
-| Push to `main` / `master` / `paperclip2` with `madsan/**` changes | After **MadSan Docker validate** → **MadSan Docker publish** (Docker Hub) → **MadSan deploy** (VM pull + up) |
+| Push to `main` / `master` / `paperclip2` with `madsan/**` changes | **Stage 1:** backend + frontend + Docker validate (parallel) → **Stage 2:** publish to Docker Hub → **Stage 3:** SSH deploy (pull + up + health) |
 | Push without `madsan/**` changes | No publish or deploy |
 | Pull request | Never publishes or deploys |
 | `workflow_dispatch` on publish / deploy | Manual registry push or VM deploy with chosen ref and `IMAGE_TAG` |
@@ -125,12 +184,13 @@ Deploy steps on the VM:
 1. **Stop legacy mining-map stack** at `/opt/mining-map` (`docker compose -f docker-compose.prod.yml down --remove-orphans`; volumes preserved). Falls back to `sudo` if the deploy user did not start legacy containers.
 2. `git fetch` + `git checkout` deploy SHA
 3. `export IMAGE_TAG=v<publish-run>` (or `latest` / short SHA via manual dispatch)
-4. `docker compose -f …/docker-compose.yml -f …/docker-compose.prod.yml --profile proxy [--profile ais] pull` for `dannyatalla/madsan-api` and `dannyatalla/madsan-frontend`
+4. `docker compose … pull` for `madsan-api`, `madsan-worker`, `madsan-scheduler`, `madsan-frontend` (and `madsan-ais-ingest` when `AISSTREAM_API_KEY` is set). Worker/scheduler/ais share the **same** `dannyatalla/madsan-api` image tag.
 5. On pull failure, fallback: `docker compose … build --pull`
-6. `docker compose … up -d --remove-orphans`
-7. Migrations run via API (`MADSAN_RUN_MIGRATIONS=true` in compose)
-8. Health check: `curl http://127.0.0.1/health` (Caddy → API)
-9. Scoped image cleanup (see below)
+6. `docker compose … up -d --remove-orphans --wait` with profiles `proxy` and optionally `ais`
+7. Health poll: `madsan-db`, `madsan-api`, `madsan-worker`, `madsan-scheduler`, `madsan-frontend`, `caddy` (+ `madsan-ais-ingest` when enabled)
+8. Edge check: `curl http://127.0.0.1/health` (Caddy → API)
+9. Migrations run via API (`MADSAN_RUN_MIGRATIONS=true` in compose)
+10. Scoped image cleanup (see below)
 
 **First run:** if `/opt/madsan` is missing or not a git checkout, deploy auto-bootstraps (clone or legacy symlink), creates `.env` from `.env.example` when absent, and seeds empty prod volumes. Existing `madsan/deploy/.env` on the VM is never overwritten.
 

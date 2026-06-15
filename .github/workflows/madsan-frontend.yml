@@ -1,4 +1,6 @@
-# MadSan frontend CI — install, typecheck, and production build.
+# MadSan frontend CI gate — typecheck and production build only.
+# Does NOT build or push Docker images. Production images come from madsan-publish.yml
+# (dannyatalla/madsan-frontend). Deploy verifies this workflow when it ran for the commit.
 # Lint is omitted until ESLint is configured (next lint prompts interactively today).
 name: MadSan frontend
 

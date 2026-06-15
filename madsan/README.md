@@ -149,6 +149,7 @@ Honest status today: only **~4 of ~95** legacy tables are imported into `madsan_
 
 ## Docs
 
+- **[Production deploy pipeline](deploy/DEPLOY.md)** — CI → Docker Hub → SSH VM (mermaid diagram + image/service map)
 - [Standalone migration checklist](docs/STANDALONE_MIGRATION.md)
 - [Legacy ETL deprecation](docs/LEGACY_ETL_DEPRECATION.md)
 - [Execution log](agent_reports/madsan_v2_execution_log.md)

@@ -1,4 +1,7 @@
-# MadSan backend CI — Go vet, test, and API binary build.
+# MadSan backend CI gate — Go vet, test, and compile check only.
+# Does NOT build or push Docker images. Production images come from madsan-publish.yml
+# (dannyatalla/madsan-api — shared by api, worker, scheduler, ais-ingest).
+# Deploy (madsan-deploy.yml) verifies this workflow succeeded when it ran for the commit.
 # Monorepo path: mining-map/madsan/backend (post-split: use madsan/.github/workflows/ci.yml).
 name: MadSan backend
 
@@ -47,7 +50,7 @@ jobs:
       - name: Build API binary
         run: CGO_ENABLED=0 go build -o bin/api ./cmd/api
 
-      - name: Upload API artifact
+      - name: Upload API artifact (debug only — not used by deploy)
         uses: actions/upload-artifact@v4
         with:
           name: madsan-api-linux-amd64

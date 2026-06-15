@@ -1,9 +1,17 @@
 # MadSan VM deploy — docker compose on linux/arm64 prod host.
 # Does NOT deploy mining-viz / legacy stack.
 #
-# Triggers after MadSan Docker publish succeeds on push to main/paperclip2.
-# PRs never deploy. Use workflow_dispatch for manual prod deploy.
+# Pipeline chain (push to main with madsan/** changes):
+#   1. MadSan backend + MadSan frontend (parallel CI gates)
+#   2. MadSan Docker validate (compose + build, no push)
+#   3. MadSan Docker publish → Docker Hub (dannyatalla/madsan-api, dannyatalla/madsan-frontend)
+#   4. This workflow (workflow_run after publish) → SSH VM → compose pull + up + health
 #
+# Compose services deployed:
+#   madsan-db (postgis/postgis), madsan-api/worker/scheduler/ais-ingest (madsan-api image),
+#   madsan-frontend (madsan-frontend image), caddy (caddy:2-alpine, --profile proxy)
+#
+# PRs never deploy. Use workflow_dispatch for manual prod deploy.
 # Required GitHub secrets (repository Settings → Secrets):
 #   DOCKER_USERNAME, DOCKER_PASSWORD — registry push (madsan-publish.yml)
 #   REMOTE_HOST, REMOTE_USER, REMOTE_SSH_KEY — SSH deploy to prod VM
@@ -294,12 +302,43 @@ jobs:
             if [ "${PULL_OK}" = "false" ]; then
               "${COMPOSE_BASE[@]}" "${PROFILES[@]}" build --pull
             fi
-            "${COMPOSE_BASE[@]}" "${PROFILES[@]}" up -d --remove-orphans
 
-            echo "Waiting for API health via Caddy..."
+            CRITICAL_SERVICES=(madsan-db madsan-api madsan-worker madsan-scheduler madsan-frontend caddy)
+            if grep -Eq '^AISSTREAM_API_KEY=.+$' "${ENV_FILE}"; then
+              CRITICAL_SERVICES+=(madsan-ais-ingest)
+            fi
+
+            echo "Bringing up stack (waiting for healthchecks)..."
+            if ! "${COMPOSE_BASE[@]}" "${PROFILES[@]}" up -d --remove-orphans --wait --wait-timeout 180; then
+              echo "WARN: compose --wait failed or timed out — falling back to manual health poll"
+            fi
+
+            _service_health_ok() {
+              local svc="$1"
+              local row
+              row="$("${COMPOSE_BASE[@]}" "${PROFILES[@]}" ps --status running --format json "${svc}" 2>/dev/null | head -1 || true)"
+              if [ -z "${row}" ]; then
+                return 1
+              fi
+              local health
+              health="$(echo "${row}" | jq -r '.Health // empty' 2>/dev/null || true)"
+              if [ -z "${health}" ] || [ "${health}" = "healthy" ]; then
+                return 0
+              fi
+              return 1
+            }
+
+            echo "Verifying critical services: ${CRITICAL_SERVICES[*]}"
             READY=false
             for i in $(seq 1 90); do
-              if curl -fsS --connect-timeout 2 --max-time 10 http://127.0.0.1/health >/dev/null 2>&1; then
+              ALL_OK=true
+              for svc in "${CRITICAL_SERVICES[@]}"; do
+                if ! _service_health_ok "${svc}"; then
+                  ALL_OK=false
+                  break
+                fi
+              done
+              if [ "${ALL_OK}" = "true" ]; then
                 READY=true
                 break
               fi
@@ -307,11 +346,28 @@ jobs:
             done
 
             if [ "${READY}" != "true" ]; then
-              echo "ERROR: health check failed after deploy"
-              "${COMPOSE_BASE[@]}" ps
+              echo "ERROR: compose health poll failed"
+              "${COMPOSE_BASE[@]}" "${PROFILES[@]}" ps
               exit 1
             fi
-            echo "Health check passed: http://127.0.0.1/health"
+            echo "Compose health checks passed for: ${CRITICAL_SERVICES[*]}"
+
+            echo "Verifying edge health via Caddy..."
+            CURL_OK=false
+            for i in $(seq 1 30); do
+              if curl -fsS --connect-timeout 2 --max-time 10 http://127.0.0.1/health >/dev/null 2>&1; then
+                CURL_OK=true
+                break
+              fi
+              sleep 2
+            done
+
+            if [ "${CURL_OK}" != "true" ]; then
+              echo "ERROR: Caddy → API health check failed after deploy"
+              "${COMPOSE_BASE[@]}" "${PROFILES[@]}" ps
+              exit 1
+            fi
+            echo "Edge health check passed: http://127.0.0.1/health"
 
             echo "Scoped image cleanup (project=${COMPOSE_PROJECT_NAME})..."
             docker image prune -f

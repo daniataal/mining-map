@@ -1,6 +1,12 @@
 # MadSan Docker validation — compose config sanity + image build (no registry push).
-# VM deploy after publish: .github/workflows/madsan-deploy.yml
-# Registry push (main only): .github/workflows/madsan-publish.yml
+# Triggers madsan-publish.yml on push to main (workflow_run).
+# VM deploy after publish: madsan-deploy.yml
+#
+# Compose services (prod overlay):
+#   madsan-api, madsan-worker, madsan-scheduler, madsan-ais-ingest → ONE image (Dockerfile.api)
+#   madsan-frontend → Dockerfile.frontend
+#   madsan-db → postgis/postgis:16-3.4 (official, not built here)
+#   caddy → caddy:2-alpine (official, not built here)
 name: MadSan Docker validate
 
 on:
@@ -51,7 +57,8 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
-      - name: Build API image
+      # Single API image bundles api, worker, scheduler, and ais-ingest binaries (see Dockerfile.api).
+      - name: Build API image (api + worker + scheduler + ais-ingest)
         uses: docker/build-push-action@v5
         with:
           context: madsan/backend

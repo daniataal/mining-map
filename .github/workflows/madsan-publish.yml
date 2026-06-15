@@ -1,6 +1,13 @@
-# MadSan Docker Hub publish — builds linux/arm64 images after Docker validate CI.
-# Registry: dannyatalla/madsan-api, dannyatalla/madsan-frontend (tags: latest, v<run>, <short_sha>).
-# VM deploy: .github/workflows/madsan-deploy.yml (pull via IMAGE_TAG after this workflow).
+# MadSan Docker Hub publish — builds and pushes linux/arm64 images after Docker validate CI.
+#
+# Registry images (all tags: latest, v<run_number>, <short_sha>):
+#   dannyatalla/madsan-api      — shared by compose services madsan-api, madsan-worker,
+#                                 madsan-scheduler, madsan-ais-ingest (Dockerfile.api)
+#   dannyatalla/madsan-frontend — madsan-frontend only (Dockerfile.frontend)
+#
+# Not built/pushed (official images on VM): postgis/postgis:16-3.4 (madsan-db), caddy:2-alpine (caddy)
+#
+# Chain: push main → madsan-docker.yml → (this workflow) → madsan-deploy.yml
 name: MadSan Docker publish
 
 on:
@@ -95,7 +102,9 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Build and push API image
+      # One image for api, worker, scheduler, and ais-ingest (different compose commands).
+      - name: Build and push API image (api + worker + scheduler + ais-ingest)
+        id: push_api
         uses: docker/build-push-action@v5
         with:
           context: madsan/backend
@@ -112,6 +121,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=madsan-api
 
       - name: Build and push frontend image
+        id: push_frontend
         uses: docker/build-push-action@v5
         with:
           context: madsan/frontend
@@ -127,3 +137,22 @@ jobs:
             type=gha,scope=madsan-frontend
             type=registry,ref=dannyatalla/madsan-frontend:latest
           cache-to: type=gha,mode=max,scope=madsan-frontend
+
+      - name: Publish summary
+        run: |
+          TAG="${{ needs.gate.outputs.image_tag }}"
+          SHA="${{ needs.gate.outputs.short_sha }}"
+          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          ## MadSan images published (linux/arm64)
+
+          | Registry image | Compose services |
+          |----------------|------------------|
+          | \`dannyatalla/madsan-api:${TAG}\` | \`madsan-api\`, \`madsan-worker\`, \`madsan-scheduler\`, \`madsan-ais-ingest\` |
+          | \`dannyatalla/madsan-frontend:${TAG}\` | \`madsan-frontend\` |
+
+          Also tagged: \`latest\`, \`${SHA}\`
+
+          **Official images (pulled on VM, not built):** \`postgis/postgis:16-3.4\` (\`madsan-db\`), \`caddy:2-alpine\` (\`caddy\`)
+
+          Next: **MadSan deploy** pulls \`IMAGE_TAG=${TAG}\` and runs compose on the prod VM.
+          EOF
