@@ -102,6 +102,8 @@ services:
   madsan-api:
     <<: [*prod-resources-api, *prod-health-api]
     platform: linux/arm64
+    build: !reset null
+    image: dannyatalla/madsan-api:${IMAGE_TAG:-latest}
     restart: always
     stop_grace_period: 20s
     ports: !reset []
@@ -111,6 +113,8 @@ services:
   madsan-worker:
     <<: [*prod-resources-worker, *prod-health-worker]
     platform: linux/arm64
+    build: !reset null
+    image: dannyatalla/madsan-api:${IMAGE_TAG:-latest}
     restart: always
     stop_grace_period: 30s
     volumes: !override
@@ -125,6 +129,8 @@ services:
   madsan-scheduler:
     <<: [*prod-resources-scheduler, *prod-health-worker]
     platform: linux/arm64
+    build: !reset null
+    image: dannyatalla/madsan-api:${IMAGE_TAG:-latest}
     restart: always
     stop_grace_period: 15s
     volumes: !override
@@ -138,6 +144,8 @@ services:
   madsan-ais-ingest:
     <<: [*prod-resources-ais-ingest, *prod-health-worker]
     platform: linux/arm64
+    build: !reset null
+    image: dannyatalla/madsan-api:${IMAGE_TAG:-latest}
     restart: always
     stop_grace_period: 15s
     depends_on:
@@ -147,14 +155,11 @@ services:
   madsan-frontend:
     <<: [*prod-resources-frontend, *prod-health-frontend]
     platform: linux/arm64
+    build: !reset null
+    image: dannyatalla/madsan-frontend:${IMAGE_TAG:-latest}
     restart: always
     stop_grace_period: 15s
     ports: !reset []
-    build:
-      context: ../frontend
-      dockerfile: ../deploy/Dockerfile.frontend
-      args:
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost}
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost}
     depends_on:

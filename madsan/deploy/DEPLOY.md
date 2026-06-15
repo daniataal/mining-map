@@ -8,15 +8,23 @@ Automated deploy: **`.github/workflows/madsan-deploy.yml`** (repo root). Legacy 
 
 ## GitHub secrets (repository Settings → Secrets)
 
+MadSan deploy reuses the **same SSH secrets as legacy mining-viz** (`docker-image.yml`):
+
 | Secret | Purpose |
 |--------|---------|
-| `MADSAN_DEPLOY_HOST` | VM hostname or IP |
-| `MADSAN_DEPLOY_USER` | SSH user (e.g. `deploy` or your sudo-capable user) |
-| `MADSAN_DEPLOY_SSH_KEY` | Private key for SSH (PEM; no passphrase recommended for Actions) |
+| `DOCKER_USERNAME` | Docker Hub login for `madsan-publish.yml` |
+| `DOCKER_PASSWORD` | Docker Hub token/password for publish |
+| `REMOTE_HOST` | VM hostname or IP |
+| `REMOTE_USER` | SSH user (e.g. `ubuntu`; must run `docker compose` or have passwordless sudo for legacy shutdown) |
+| `REMOTE_SSH_KEY` | Private key for SSH (PEM; no passphrase recommended for Actions) |
 
-Do **not** store application secrets in GitHub for MadSan deploy — they live in `deploy/.env` on the VM only.
+Optional aliases (only if `REMOTE_*` is not set): `MADSAN_DEPLOY_HOST`, `MADSAN_DEPLOY_USER`, `MADSAN_DEPLOY_SSH_KEY`.
 
-Optional: create a GitHub **environment** named `production` if you want approval gates on deploy jobs.
+**Do not** add MadSan-specific GitHub secrets for API keys (`AISSTREAM_API_KEY`, `GROQ_API_KEY`, `EIA_API_KEY`, etc.). Those belong in **`madsan/deploy/.env` on the VM only** — the deploy workflow never reads them from GitHub.
+
+Optional repo **variable** (not secret): `MADSAN_NEXT_PUBLIC_API_URL` — baked into the frontend image at publish time; should match `NEXT_PUBLIC_API_URL` in `deploy/.env` on the VM.
+
+Optional: create a GitHub **environment** named `production` if you want approval gates on publish/deploy jobs.
 
 ## VM env file (`deploy/.env`)
 
@@ -91,19 +99,24 @@ Install backup cron (optional): `madsan/scripts/install_backup_cron.sh`
 
 | Trigger | What happens |
 |---------|----------------|
-| Push to `main` / `master` / `paperclip2` with `madsan/**` changes | After **MadSan Docker validate** CI succeeds, deploy runs |
-| Push without `madsan/**` changes | No deploy |
-| Pull request | Never deploys |
-| `workflow_dispatch` | Manual deploy of chosen ref (optional `skip_ci_gate` for emergencies) |
+| Push to `main` / `master` / `paperclip2` with `madsan/**` changes | After **MadSan Docker validate** → **MadSan Docker publish** (Docker Hub) → **MadSan deploy** (VM pull + up) |
+| Push without `madsan/**` changes | No publish or deploy |
+| Pull request | Never publishes or deploys |
+| `workflow_dispatch` on publish / deploy | Manual registry push or VM deploy with chosen ref and `IMAGE_TAG` |
 
 Deploy steps on the VM:
 
-1. `git fetch` + `git checkout` deploy SHA
-2. `docker compose -f …/docker-compose.yml -f …/docker-compose.prod.yml --profile proxy [--profile ais] build --pull`
-3. `docker compose … up -d --remove-orphans`
-4. Migrations run via API (`MADSAN_RUN_MIGRATIONS=true` in compose)
-5. Health check: `curl http://127.0.0.1/health` (Caddy → API)
-6. Scoped image cleanup (see below)
+1. **Stop legacy mining-map stack** at `/opt/mining-map` (`docker compose -f docker-compose.prod.yml down --remove-orphans`; volumes preserved). Falls back to `sudo` if the deploy user did not start legacy containers.
+2. `git fetch` + `git checkout` deploy SHA
+3. `export IMAGE_TAG=v<publish-run>` (or `latest` / short SHA via manual dispatch)
+4. `docker compose -f …/docker-compose.yml -f …/docker-compose.prod.yml --profile proxy [--profile ais] pull` for `dannyatalla/madsan-api` and `dannyatalla/madsan-frontend`
+5. On pull failure, fallback: `docker compose … build --pull`
+6. `docker compose … up -d --remove-orphans`
+7. Migrations run via API (`MADSAN_RUN_MIGRATIONS=true` in compose)
+8. Health check: `curl http://127.0.0.1/health` (Caddy → API)
+9. Scoped image cleanup (see below)
+
+**Prerequisite:** `/opt/madsan` must be a git checkout with `madsan/deploy/.env` configured (first-time bootstrap below). Deploy does not clone the repo or create `.env`.
 
 ## Image cleanup strategy
 
@@ -113,9 +126,20 @@ After a successful health check, the deploy script:
 2. Removes **unused** images labeled `com.docker.compose.project=madsan` (not referenced by any container)
 3. `docker builder prune -f --filter until=48h` — old build cache
 
-It does **not** run `docker image prune -a` (legacy mining-viz deploy still uses that on manual runs).
+It does **not** run `docker image prune -a` and does **not** remove legacy mining images — only stops legacy **containers** before bring-up.
 
 Set `COMPOSE_PROJECT_NAME=madsan` so labels stay consistent.
+
+## Cutover from legacy mining-viz
+
+| Legacy | MadSan |
+|--------|--------|
+| Path `/opt/mining-map` | Path `/opt/madsan` |
+| Workflow `docker-image.yml` (manual on `madsan-ship-clean`; push-to-main on current `main`) | Workflow `madsan-deploy.yml` (auto after CI on `main`/`paperclip2`, or `workflow_dispatch`) |
+| Registry images `dannyatalla/mining-*` | Registry images `dannyatalla/madsan-api`, `dannyatalla/madsan-frontend` (pull on VM; fallback build) |
+| GitHub injects API keys at deploy | API keys in `madsan/deploy/.env` only |
+
+Until `madsan-ship-clean` (or equivalent) is merged to `main`, **`madsan-deploy.yml` does not exist on `main`** and MadSan will never auto-deploy. Legacy v281 came from a **`docker-image.yml` workflow_dispatch** (or push on `main`) using `REMOTE_*` secrets.
 
 ## Routine deploy (manual)
 
