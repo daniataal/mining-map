@@ -5,7 +5,7 @@
 # Compose services (prod overlay):
 #   madsan-api, madsan-worker, madsan-scheduler, madsan-ais-ingest → ONE image (Dockerfile.api)
 #   madsan-frontend → Dockerfile.frontend
-#   madsan-db → postgis/postgis:16-3.4 (official, not built here)
+#   madsan-db → imresamu/postgis:16-3.6.1-bookworm (arm64; official postgis is amd64-only)
 #   caddy → caddy:2-alpine (official, not built here)
 name: MadSan Docker validate
 
@@ -49,8 +49,8 @@ jobs:
           docker compose -f docker-compose.yml -f docker-compose.prod.yml config --quiet
 
   docker-build:
-    name: Build API and frontend images
-    runs-on: ubuntu-latest
+    name: Build API and frontend images (linux/arm64)
+    runs-on: ubuntu-24.04-arm
     needs: compose-config
     steps:
       - uses: actions/checkout@v4
@@ -63,6 +63,7 @@ jobs:
         with:
           context: madsan/backend
           file: madsan/deploy/Dockerfile.api
+          platforms: linux/arm64
           push: false
           tags: madsan-api:ci
           cache-from: type=gha,scope=madsan-api
@@ -73,6 +74,7 @@ jobs:
         with:
           context: madsan/frontend
           file: madsan/deploy/Dockerfile.frontend
+          platforms: linux/arm64
           push: false
           tags: madsan-frontend:ci
           build-args: NEXT_PUBLIC_API_URL=http://localhost

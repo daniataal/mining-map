@@ -1,5 +1,7 @@
 # MadSan production deploy
 
+**Production VM is Oracle Cloud aarch64 (`linux/arm64`)** — e.g. `ubuntu@129.159.141.101`, deploy path `/opt/madsan`. All registry images (`dannyatalla/madsan-api`, `dannyatalla/madsan-frontend`) and the prod PostGIS image must be **arm64-native**. Do not use `postgis/postgis:16-3.4` on prod (official image is amd64-only); the prod overlay defaults to `imresamu/postgis:16-3.6.1-bookworm`.
+
 Standalone checkout path on the prod VM: **`/opt/madsan/`** (not `/opt/mining-map/madsan/`).
 
 While MadSan still lives in the `mining-map` monorepo, clone the **full monorepo** to `/opt/madsan` and use compose paths under `madsan/deploy/`. After repo split, the same directory holds a MadSan-only checkout with `deploy/` at the repo root.

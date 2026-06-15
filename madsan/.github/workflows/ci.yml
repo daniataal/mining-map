@@ -64,6 +64,6 @@ jobs:
       - name: Upload API artifact
         uses: actions/upload-artifact@v4
         with:
-          name: madsan-api-linux-amd64
+          name: madsan-api-ci-binary
           path: backend/bin/api
           if-no-files-found: error

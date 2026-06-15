@@ -5,7 +5,7 @@
 #                                 madsan-scheduler, madsan-ais-ingest (Dockerfile.api)
 #   dannyatalla/madsan-frontend — madsan-frontend only (Dockerfile.frontend)
 #
-# Not built/pushed (official images on VM): postgis/postgis:16-3.4 (madsan-db), caddy:2-alpine (caddy)
+# Not built/pushed (pulled on arm64 VM): imresamu/postgis:16-3.6.1-bookworm (madsan-db), caddy:2-alpine (caddy)
 #
 # Chain: push main → madsan-docker.yml → (this workflow) → madsan-deploy.yml
 name: MadSan Docker publish
@@ -152,7 +152,7 @@ jobs:
 
           Also tagged: \`latest\`, \`${SHA}\`
 
-          **Official images (pulled on VM, not built):** \`postgis/postgis:16-3.4\` (\`madsan-db\`), \`caddy:2-alpine\` (\`caddy\`)
+          **Pulled on arm64 VM (not built):** \`imresamu/postgis:16-3.6.1-bookworm\` (\`madsan-db\`), \`caddy:2-alpine\` (\`caddy\`)
 
           Next: **MadSan deploy** pulls \`IMAGE_TAG=${TAG}\` and runs compose on the prod VM.
           EOF

@@ -8,7 +8,7 @@
 #   4. This workflow (workflow_run after publish) → SSH VM → compose pull + up + health
 #
 # Compose services deployed:
-#   madsan-db (postgis/postgis), madsan-api/worker/scheduler/ais-ingest (madsan-api image),
+#   madsan-db (imresamu/postgis arm64), madsan-api/worker/scheduler/ais-ingest (madsan-api image),
 #   madsan-frontend (madsan-frontend image), caddy (caddy:2-alpine, --profile proxy)
 #
 # PRs never deploy. Use workflow_dispatch for manual prod deploy.
