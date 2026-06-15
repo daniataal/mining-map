@@ -160,6 +160,10 @@ jobs:
             LEGACY_PATH="${LEGACY_DEPLOY_PATH:-/opt/mining-map}"
             export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-madsan}"
 
+            _step() {
+              echo "=== STEP: $* ==="
+            }
+
             _ensure_deploy_path_ready() {
               local path="$1"
               if [ -d "${path}" ]; then
@@ -248,6 +252,7 @@ jobs:
 
             _bootstrap_deploy_checkout
 
+            _step "checkout deploy SHA"
             cd "${DEPLOY_PATH}"
             git fetch --tags origin
             git checkout "${DEPLOY_SHA}"
@@ -265,6 +270,7 @@ jobs:
               exit 1
             fi
 
+            _step "prepare deploy env"
             ENV_FILE="${REPO_ROOT}/${COMPOSE_DIR}/.env"
             ENV_EXAMPLE="${REPO_ROOT}/${COMPOSE_DIR}/.env.example"
             if [ ! -f "${ENV_FILE}" ]; then
@@ -277,10 +283,39 @@ jobs:
               fi
             fi
 
+            _stop_legacy_stack() {
+              local legacy_path="$1"
+              local compose_file="${legacy_path}/docker-compose.prod.yml"
+              if [ ! -f "${compose_file}" ]; then
+                echo "No legacy compose at ${compose_file} — skipping legacy shutdown"
+                return 0
+              fi
+              echo "Stopping legacy mining-map stack at ${legacy_path} (volumes preserved)..."
+              local down_ok=false
+              if (cd "${legacy_path}" && docker compose -f docker-compose.prod.yml down --remove-orphans); then
+                down_ok=true
+              elif (cd "${legacy_path}" && sudo docker compose -f docker-compose.prod.yml down --remove-orphans); then
+                down_ok=true
+              elif (cd "${legacy_path}" && sudo docker-compose -f docker-compose.prod.yml down --remove-orphans); then
+                down_ok=true
+              fi
+              if [ "${down_ok}" = "true" ]; then
+                echo "Legacy stack stopped"
+              else
+                echo "WARN: legacy stack shutdown failed (permission, compose missing, or stack not running) — continuing MadSan deploy"
+              fi
+              return 0
+            }
+
             if _volume_is_empty madsan_raw_data || _volume_is_empty madsan_etl_data; then
               if [ -x "${REPO_ROOT}/${SEED_SCRIPT}" ]; then
-                echo "Seeding empty prod volumes via ${SEED_SCRIPT}..."
-                (cd "${REPO_ROOT}" && "./${SEED_SCRIPT}")
+                _step "seed prod volumes"
+                if (cd "${REPO_ROOT}" && "./${SEED_SCRIPT}"); then
+                  echo "Volume seed finished successfully"
+                else
+                  echo "ERROR: ${SEED_SCRIPT} failed"
+                  exit 1
+                fi
               else
                 echo "WARN: ${SEED_SCRIPT} missing or not executable — skipping volume seed"
               fi
@@ -288,19 +323,8 @@ jobs:
               echo "Prod volumes already populated — skipping seed_prod_volumes.sh"
             fi
 
-            LEGACY_COMPOSE="${LEGACY_PATH}/docker-compose.prod.yml"
-            if [ -f "${LEGACY_COMPOSE}" ]; then
-              echo "Stopping legacy mining-map stack at ${LEGACY_PATH} (volumes preserved)..."
-              _legacy_down() {
-                cd "${LEGACY_PATH}"
-                docker compose -f docker-compose.prod.yml down --remove-orphans
-              }
-              if ! _legacy_down 2>/dev/null; then
-                sudo bash -c "cd '${LEGACY_PATH}' && docker compose -f docker-compose.prod.yml down --remove-orphans"
-              fi
-            else
-              echo "No legacy compose at ${LEGACY_COMPOSE} — skipping legacy shutdown"
-            fi
+            _step "legacy stack shutdown"
+            _stop_legacy_stack "${LEGACY_PATH}"
 
             COMPOSE_BASE=(docker compose -f "${COMPOSE_DIR}/docker-compose.yml" -f "${COMPOSE_DIR}/docker-compose.prod.yml")
             PROFILES=(--profile proxy)
@@ -311,6 +335,7 @@ jobs:
               echo "AISSTREAM_API_KEY unset — skipping ais profile"
             fi
 
+            _step "compose pull or build"
             echo "Deploying ${DEPLOY_SHA} (${DEPLOY_REF}) IMAGE_TAG=${IMAGE_TAG} from ${DEPLOY_PATH}"
             export IMAGE_TAG="${IMAGE_TAG:-latest}"
 
@@ -334,6 +359,7 @@ jobs:
               CRITICAL_SERVICES+=(madsan-ais-ingest)
             fi
 
+            _step "compose up"
             echo "Bringing up stack (waiting for healthchecks)..."
             if ! "${COMPOSE_BASE[@]}" "${PROFILES[@]}" up -d --remove-orphans --wait --wait-timeout 180; then
               echo "WARN: compose --wait failed or timed out — falling back to manual health poll"
@@ -346,14 +372,19 @@ jobs:
               if [ -z "${row}" ]; then
                 return 1
               fi
-              local health
-              health="$(echo "${row}" | jq -r '.Health // empty' 2>/dev/null || true)"
+              local health=""
+              if command -v jq >/dev/null 2>&1; then
+                health="$(echo "${row}" | jq -r '.Health // empty' 2>/dev/null || true)"
+              else
+                health="$(echo "${row}" | sed -n 's/.*"Health":"\([^"]*\)".*/\1/p' | head -1 || true)"
+              fi
               if [ -z "${health}" ] || [ "${health}" = "healthy" ]; then
                 return 0
               fi
               return 1
             }
 
+            _step "compose health poll"
             echo "Verifying critical services: ${CRITICAL_SERVICES[*]}"
             READY=false
             for i in $(seq 1 90); do
@@ -378,6 +409,7 @@ jobs:
             fi
             echo "Compose health checks passed for: ${CRITICAL_SERVICES[*]}"
 
+            _step "edge health via Caddy"
             echo "Verifying edge health via Caddy..."
             CURL_OK=false
             for i in $(seq 1 30); do
@@ -395,6 +427,7 @@ jobs:
             fi
             echo "Edge health check passed: http://127.0.0.1/health"
 
+            _step "scoped image cleanup"
             echo "Scoped image cleanup (project=${COMPOSE_PROJECT_NAME})..."
             docker image prune -f
 

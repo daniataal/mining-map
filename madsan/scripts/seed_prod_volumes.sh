@@ -70,4 +70,7 @@ else
   echo "Verify (optional):"
   echo "  docker run --rm -v ${RAW_VOL}:/v alpine ls -la /v | head"
   echo "  docker run --rm -v ${ETL_VOL}:/v alpine ls -la /v | head"
+  echo "Seed complete."
 fi
+
+exit 0

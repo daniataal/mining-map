@@ -127,7 +127,7 @@ Target: **linux/arm64** VM (~23 GiB RAM per prod overlay comments).
 6. Run `madsan/scripts/seed_prod_volumes.sh` only when `madsan_raw_data` / `madsan_etl_data` volumes are empty
 7. Stop legacy stack at `/opt/mining-map`, then `docker compose pull` / `up`
 
-Prerequisites on the VM: Docker Engine + Compose v2, `git`, `curl`; deploy user in `docker` group (or passwordless `sudo` for legacy shutdown).
+Prerequisites on the VM: Docker Engine + Compose v2, `git`, `curl`; deploy user in `docker` group (or passwordless `sudo` for legacy shutdown). `jq` is optional — health poll falls back to `sed` when absent.
 
 **One-time VM permission note:** the deploy user needs **passwordless `sudo` for `mkdir` and `chown` under `/opt`** (bootstrap only), **or** an operator must pre-create the checkout directory before the first deploy:
 
@@ -190,7 +190,7 @@ Install backup cron (optional): `madsan/scripts/install_backup_cron.sh`
 
 Deploy steps on the VM:
 
-1. **Stop legacy mining-map stack** at `/opt/mining-map` (`docker compose -f docker-compose.prod.yml down --remove-orphans`; volumes preserved). Falls back to `sudo` if the deploy user did not start legacy containers.
+1. **Stop legacy mining-map stack** at `/opt/mining-map` (`docker compose -f docker-compose.prod.yml down --remove-orphans`; volumes preserved). Tries deploy user, then `sudo docker compose`, then `sudo docker-compose`. **Non-fatal** — warns and continues if shutdown fails (permissions, stack not running, or compose missing).
 2. `git fetch` + `git checkout` deploy SHA
 3. `export IMAGE_TAG=v<publish-run>` (or `latest` / short SHA via manual dispatch)
 4. `docker compose … pull` for `madsan-api`, `madsan-worker`, `madsan-scheduler`, `madsan-frontend` (and `madsan-ais-ingest` when `AISSTREAM_API_KEY` is set). Worker/scheduler/ais share the **same** `dannyatalla/madsan-api` image tag.
