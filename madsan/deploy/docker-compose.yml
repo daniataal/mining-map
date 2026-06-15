@@ -41,7 +41,8 @@ x-host-gateway: &host-gateway
 
 services:
   madsan-db:
-    image: postgis/postgis:16-3.4
+    # Override on arm64 prod via docker-compose.prod.yml (official postgis is amd64-only).
+    image: ${MADSAN_DB_IMAGE:-postgis/postgis:16-3.4}
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${MADSAN_DB_PASSWORD:-password}

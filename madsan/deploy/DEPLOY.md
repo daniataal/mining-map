@@ -58,7 +58,7 @@ Manual runs: `workflow_dispatch` on **MadSan Docker publish** or **MadSan deploy
 |----------------|------------|-------------------|--------|
 | `dannyatalla/madsan-api` | `madsan/deploy/Dockerfile.api` | `madsan-api`, `madsan-worker`, `madsan-scheduler`, `madsan-ais-ingest` | One image; different `command` per service (`/app/api`, `/app/worker`, `/app/scheduler`, `/app/ais-ingest`) |
 | `dannyatalla/madsan-frontend` | `madsan/deploy/Dockerfile.frontend` | `madsan-frontend` | `NEXT_PUBLIC_API_URL` baked at publish |
-| `postgis/postgis:16-3.4` | — (official) | `madsan-db` | Pulled on VM; not built in CI |
+| `imresamu/postgis:16-3.6.1-bookworm` (prod arm64) | — (multi-arch) | `madsan-db` | Official `postgis/postgis` is amd64-only; prod overlay uses `imresamu/postgis` on arm64 VMs |
 | `caddy:2-alpine` | — (official) | `caddy` | `--profile proxy`; not built in CI |
 
 Prod overlay (`docker-compose.prod.yml`) sets `IMAGE_TAG` (default `latest`; auto deploy uses `v<publish-run-number>`).
@@ -231,6 +231,7 @@ Set `COMPOSE_PROJECT_NAME=madsan` so labels stay consistent.
 | `docker ps` empty on the VM | Deploy never finished (failed at prepare env, checkout, pull, or health) | Check **MadSan deploy** workflow logs on GitHub Actions; re-run **MadSan deploy** with `workflow_dispatch`, ref **`main`**, and the intended `IMAGE_TAG` (e.g. `latest` or `v<N>` from publish) |
 | Deploy fails at **prepare deploy env** | Missing or unreadable `madsan/deploy/.env`, or stale deploy script from an old git checkout | Confirm `/opt/madsan/madsan/deploy/.env` exists and is readable; fill in real secrets (not `.env.example` placeholders). Ensure VM checkout is on `origin/main` so compose scripts match current main |
 | `.env` exists but stack still unhealthy | Placeholder values from `.env.example` (`MADSAN_DB_PASSWORD`, `MADSAN_JWT_SECRET`, etc.) | Edit `.env` on the host with production secrets; redeploy |
+| `compose up` fails: postgis `does not provide the specified platform (linux/arm64)` | Official `postgis/postgis:16-3.4` is amd64-only on an aarch64 VM | Ensure `docker-compose.prod.yml` on VM sets `MADSAN_DB_IMAGE=imresamu/postgis:16-3.6.1-bookworm` (default in prod overlay); `git pull` / redeploy from `main` |
 
 Auto-deploy after publish pins **registry** tags (`IMAGE_TAG=v<N>`) but checks out **`origin/main`** for compose files — not the publish commit SHA. If a deploy ran before a workflow fix landed, re-run deploy manually with ref **`main`**.
 

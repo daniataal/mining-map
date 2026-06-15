@@ -389,7 +389,7 @@ jobs:
             echo "Deploying app IMAGE_TAG=${IMAGE_TAG} from git $(git rev-parse --short HEAD)"
             export IMAGE_TAG="${IMAGE_TAG:-latest}"
 
-            PULL_SERVICES=(madsan-api madsan-worker madsan-scheduler madsan-frontend)
+            PULL_SERVICES=(madsan-db madsan-api madsan-worker madsan-scheduler madsan-frontend)
             if grep -Eq '^AISSTREAM_API_KEY=.+$' "${ENV_FILE}"; then
               PULL_SERVICES+=(madsan-ais-ingest)
             fi
@@ -413,6 +413,10 @@ jobs:
             echo "Bringing up stack (waiting for healthchecks)..."
             if ! "${COMPOSE_BASE[@]}" "${PROFILES[@]}" up -d --remove-orphans --wait --wait-timeout 180; then
               echo "WARN: compose --wait failed or timed out - falling back to manual health poll"
+              if "${COMPOSE_BASE[@]}" "${PROFILES[@]}" ps --format json 2>/dev/null | grep -q 'does not provide the specified platform'; then
+                echo "HINT: arm64 VMs need MADSAN_DB_IMAGE=imresamu/postgis:16-3.6.1-bookworm (see docker-compose.prod.yml)"
+              fi
+              "${COMPOSE_BASE[@]}" "${PROFILES[@]}" ps || true
             fi
 
             _service_health_ok() {

@@ -93,6 +93,8 @@ x-prod-health-caddy: &prod-health-caddy
 
 services:
   madsan-db:
+    # Official postgis/postgis is amd64-only; imresamu/postgis publishes linux/arm64 builds.
+    image: ${MADSAN_DB_IMAGE:-imresamu/postgis:16-3.6.1-bookworm}
     <<: [*prod-resources-db, *prod-health-db]
     platform: linux/arm64
     restart: always
