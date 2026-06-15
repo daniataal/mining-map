@@ -1,12 +1,12 @@
 # MadSan VM deploy — docker compose on linux/arm64 prod host.
-# Does NOT deploy mining-viz / legacy stack (see docker-image.yml, manual only).
+# Does NOT deploy mining-viz / legacy stack.
 #
 # Triggers after MadSan Docker publish succeeds on push to main/paperclip2.
 # PRs never deploy. Use workflow_dispatch for manual prod deploy.
 #
 # Required GitHub secrets (repository Settings → Secrets):
 #   DOCKER_USERNAME, DOCKER_PASSWORD — registry push (madsan-publish.yml)
-#   REMOTE_HOST, REMOTE_USER, REMOTE_SSH_KEY — same as legacy docker-image.yml deploy
+#   REMOTE_HOST, REMOTE_USER, REMOTE_SSH_KEY — SSH deploy to prod VM
 # Optional aliases (used only when REMOTE_* is unset): MADSAN_DEPLOY_HOST, MADSAN_DEPLOY_USER, MADSAN_DEPLOY_SSH_KEY
 # Optional repo variable: MADSAN_NEXT_PUBLIC_API_URL — baked into frontend at publish (match deploy/.env on VM)
 # Application API keys live in madsan/deploy/.env on the VM — not in GitHub.

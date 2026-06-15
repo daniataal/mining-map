@@ -4,11 +4,11 @@ Standalone checkout path on the prod VM: **`/opt/madsan/`** (not `/opt/mining-ma
 
 While MadSan still lives in the `mining-map` monorepo, clone the **full monorepo** to `/opt/madsan` and use compose paths under `madsan/deploy/`. After repo split, the same directory holds a MadSan-only checkout with `deploy/` at the repo root.
 
-Automated deploy: **`.github/workflows/madsan-deploy.yml`** (repo root). Legacy mining-viz deploy remains manual in `.github/workflows/docker-image.yml`.
+Automated deploy: **`.github/workflows/madsan-deploy.yml`** (repo root).
 
 ## GitHub secrets (repository Settings → Secrets)
 
-MadSan deploy reuses the **same SSH secrets as legacy mining-viz** (`docker-image.yml`):
+MadSan deploy uses these **SSH and registry secrets** (repository Settings → Secrets):
 
 | Secret | Purpose |
 |--------|---------|
@@ -132,14 +132,12 @@ Set `COMPOSE_PROJECT_NAME=madsan` so labels stay consistent.
 
 ## Cutover from legacy mining-viz
 
-| Legacy | MadSan |
-|--------|--------|
+| Legacy mining-viz | MadSan |
+|-------------------|--------|
 | Path `/opt/mining-map` | Path `/opt/madsan` |
-| Workflow `docker-image.yml` (manual on `madsan-ship-clean`; push-to-main on current `main`) | Workflow `madsan-deploy.yml` (auto after CI on `main`/`paperclip2`, or `workflow_dispatch`) |
+| Manual VM deploy / legacy CI (removed) | Workflow `madsan-deploy.yml` (auto after CI on `main`/`paperclip2`, or `workflow_dispatch`) |
 | Registry images `dannyatalla/mining-*` | Registry images `dannyatalla/madsan-api`, `dannyatalla/madsan-frontend` (pull on VM; fallback build) |
 | GitHub injects API keys at deploy | API keys in `madsan/deploy/.env` only |
-
-Until `madsan-ship-clean` (or equivalent) is merged to `main`, **`madsan-deploy.yml` does not exist on `main`** and MadSan will never auto-deploy. Legacy v281 came from a **`docker-image.yml` workflow_dispatch** (or push on `main`) using `REMOTE_*` secrets.
 
 ## Routine deploy (manual)
 
