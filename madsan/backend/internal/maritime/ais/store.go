@@ -98,13 +98,13 @@ func UpsertVesselFromSource(ctx context.Context, pool *pgxpool.Pool, u *Update, 
 			confidence_score, data_quality_status
 		) VALUES (
 			$1, NULLIF($2,''), $3, $4,
-			CASE WHEN $13::bool THEN $5::double precision END,
-			CASE WHEN $13::bool THEN $6::double precision END,
-			CASE WHEN $13::bool AND $5::double precision IS NOT NULL AND $6::double precision IS NOT NULL
+			CASE WHEN $12::bool THEN $5::double precision END,
+			CASE WHEN $12::bool THEN $6::double precision END,
+			CASE WHEN $12::bool AND $5::double precision IS NOT NULL AND $6::double precision IS NOT NULL
 				THEN ST_SetSRID(ST_MakePoint($6::double precision, $5::double precision), 4326)::geography END,
-			$7, $8, $9, NULLIF($10,''),
-			CASE WHEN $13::bool THEN $11::timestamptz END,
-			NULLIF($14,''), $15,
+			$7::double precision, $8::double precision, $9::double precision, NULLIF($10,''),
+			CASE WHEN $12::bool THEN $11::timestamptz END,
+			NULLIF($13,''), $14,
 			70, 'observed'
 		)
 		ON CONFLICT (mmsi) DO UPDATE SET
@@ -113,43 +113,43 @@ func UpsertVesselFromSource(ctx context.Context, pool *pgxpool.Pool, u *Update, 
 			callsign = COALESCE(NULLIF(EXCLUDED.callsign,''), vessels.callsign),
 			vessel_type = COALESCE(NULLIF(EXCLUDED.vessel_type,''), vessels.vessel_type),
 			latitude = CASE
-				WHEN $13::bool IS FALSE THEN vessels.latitude
+				WHEN $12::bool IS FALSE THEN vessels.latitude
 				WHEN EXCLUDED.last_seen_at >= COALESCE(vessels.last_seen_at, 'epoch'::timestamptz)
 				THEN EXCLUDED.latitude ELSE vessels.latitude END,
 			longitude = CASE
-				WHEN $13::bool IS FALSE THEN vessels.longitude
+				WHEN $12::bool IS FALSE THEN vessels.longitude
 				WHEN EXCLUDED.last_seen_at >= COALESCE(vessels.last_seen_at, 'epoch'::timestamptz)
 				THEN EXCLUDED.longitude ELSE vessels.longitude END,
 			geom = CASE
-				WHEN $13::bool IS FALSE THEN vessels.geom
+				WHEN $12::bool IS FALSE THEN vessels.geom
 				WHEN EXCLUDED.last_seen_at >= COALESCE(vessels.last_seen_at, 'epoch'::timestamptz)
 				THEN EXCLUDED.geom ELSE vessels.geom END,
 			course = CASE
-				WHEN $13::bool IS FALSE THEN vessels.course
+				WHEN $12::bool IS FALSE THEN vessels.course
 				WHEN EXCLUDED.last_seen_at >= COALESCE(vessels.last_seen_at, 'epoch'::timestamptz)
 				THEN EXCLUDED.course
 				WHEN vessels.course IS NULL THEN EXCLUDED.course
 				ELSE vessels.course END,
 			heading = CASE
-				WHEN $13::bool IS FALSE THEN vessels.heading
+				WHEN $12::bool IS FALSE THEN vessels.heading
 				WHEN EXCLUDED.last_seen_at >= COALESCE(vessels.last_seen_at, 'epoch'::timestamptz)
 				THEN EXCLUDED.heading
 				WHEN vessels.heading IS NULL THEN EXCLUDED.heading
 				ELSE vessels.heading END,
 			speed_knots = CASE
-				WHEN $13::bool IS FALSE THEN vessels.speed_knots
+				WHEN $12::bool IS FALSE THEN vessels.speed_knots
 				WHEN EXCLUDED.last_seen_at >= COALESCE(vessels.last_seen_at, 'epoch'::timestamptz)
 				THEN EXCLUDED.speed_knots ELSE vessels.speed_knots END,
 			destination = COALESCE(NULLIF(EXCLUDED.destination,''), vessels.destination),
 			last_seen_at = CASE
-				WHEN $13::bool THEN GREATEST(COALESCE(vessels.last_seen_at, EXCLUDED.last_seen_at), EXCLUDED.last_seen_at)
+				WHEN $12::bool THEN GREATEST(COALESCE(vessels.last_seen_at, EXCLUDED.last_seen_at), EXCLUDED.last_seen_at)
 				ELSE vessels.last_seen_at END,
 			last_position_source = CASE
-				WHEN $13::bool AND EXCLUDED.last_seen_at >= COALESCE(vessels.last_seen_at, 'epoch'::timestamptz)
+				WHEN $12::bool AND EXCLUDED.last_seen_at >= COALESCE(vessels.last_seen_at, 'epoch'::timestamptz)
 				THEN EXCLUDED.last_position_source
 				ELSE vessels.last_position_source END,
 			updated_at = now()
-		RETURNING id, ($13::bool AND last_seen_at = $11::timestamptz) AS position_fresh
+		RETURNING id, ($12::bool AND last_seen_at = $11::timestamptz) AS position_fresh
 	`, u.Name, u.IMO, mmsi, vesselType, u.Lat, u.Lon, course, heading, speed, u.Destination, u.Timestamp, u.HasKinematics, nullStr(u.Callsign), positionSource).Scan(&id, &fresh)
 	if err != nil {
 		return uuid.Nil, false, err
