@@ -305,7 +305,7 @@ Ingest subscribes only to bounding boxes around terminal/port assets in `madsan_
 
    ```bash
    curl -fsS http://127.0.0.1/health
-   ./madsan/scripts/compose_prod.sh ps | rg -n "ais-ingest|madsan-ais-ingest" || true
+   ./madsan/scripts/compose_prod.sh ps | grep -E "ais-ingest|madsan-ais-ingest" || true
    ```
 
 ### Optional ARM tuning (`.env`)
