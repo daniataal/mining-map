@@ -27,14 +27,17 @@ import { authFetchOpts } from "@/lib/auth";
 import { canUse, effectiveEntitlements, FEATURE } from "@/lib/entitlements";
 import { apiBase } from "@/lib/layers";
 import { mergePipelineFocus, pipelineFocusFromSelection, type PipelineMapFocus } from "@/lib/energyApi";
+import dynamic from "next/dynamic";
 import EntityDossierPanel, { type MapSelection } from "./EntityDossierPanel";
-import IntelligenceMap, { type MapRuntimeStatus } from "./IntelligenceMap";
+import type { MapRuntimeStatus } from "./IntelligenceMap";
 import LiveIntelPanel from "./LiveIntelPanel";
 import OpportunityOriginatorPanel from "./OpportunityOriginatorPanel";
 import SearchPalette from "./SearchPalette";
 import SupplierSearchPanel from "./SupplierSearchPanel";
 import TickerTrendBar from "./TickerTrendBar";
 import WatchlistsPanel, { useDealWatchAvailable } from "./WatchlistsPanel";
+
+const IntelligenceMap = dynamic(() => import("./IntelligenceMap"), { ssr: false });
 
 type Vertical = "energy" | "metals";
 type Panel = "intel" | "opportunities" | "suppliers" | "live" | "watch";

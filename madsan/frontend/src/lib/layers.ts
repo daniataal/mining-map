@@ -307,6 +307,14 @@ export function apiBase(): string {
   return baked;
 }
 
+/** Absolute MVT origin — MapLibre resolves relative tile URLs against the basemap style host. */
+export function tileApiBase(): string {
+  const base = apiBase();
+  if (base) return base.replace(/\/$/, "");
+  if (typeof window !== "undefined") return window.location.origin;
+  return "";
+}
+
 export function isLocalDevApi(): boolean {
   if (typeof window !== "undefined") {
     const h = window.location.hostname;
@@ -328,8 +336,8 @@ export function wsApiBase(): string {
 
 /** Auth cookies only for our MVT host — never OpenFreeMap basemap tiles. */
 export function isOwnTileUrl(url: string): boolean {
-  const base = apiBase();
-  if (base) return url.startsWith(base);
+  const base = tileApiBase();
+  if (base) return url.startsWith(base) && url.includes("/tiles/");
   try {
     return new URL(url, window.location.origin).pathname.startsWith("/tiles/");
   } catch {

@@ -19,6 +19,7 @@ import {
   MAP_COLORS,
   mapStyleForTheme,
   mapSourceKey,
+  tileApiBase,
   wsApiBase,
   metalsMapLayersActive,
   type LayerDef,
@@ -1016,6 +1017,8 @@ export default function IntelligenceMap({
   const { theme } = useTheme();
   const container = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
+  /** Bumps on map effect cleanup so async `load` cannot run setup on a torn-down instance. */
+  const mapSetupGen = useRef(0);
   const hoverPopupRef = useRef<maplibregl.Popup | null>(null);
   const clickPopupRef = useRef<maplibregl.Popup | null>(null);
   const selectedFeatureRef = useRef<FeatureTarget | null>(null);
@@ -1078,6 +1081,7 @@ export default function IntelligenceMap({
 
   useEffect(() => {
     if (!container.current || mapRef.current) return;
+    const setupGen = ++mapSetupGen.current;
     ensureMapRtlPlugin();
     const map = new maplibregl.Map({
       container: container.current,
@@ -1100,11 +1104,11 @@ export default function IntelligenceMap({
     let wsRetryTimer: ReturnType<typeof setTimeout> | null = null;
     let moveEndHandler: (() => void) | null = null;
     let vesselMotion: VesselDeadReckoning | null = null;
-    let cancelled = false;
     let animFrame = 0;
+    const isStale = () => mapSetupGen.current !== setupGen;
 
     const setupMap = () => {
-      if (cancelled) return;
+      if (isStale()) return;
       ensureVesselImages(map);
       applyBasemapTuning(map, theme);
 
@@ -1114,9 +1118,10 @@ export default function IntelligenceMap({
         .forEach((layer) => {
           const src = mapSourceKey(layer);
           if (!sourcesAdded.has(src)) {
+            const tileUrl = `${tileApiBase()}/tiles/${layer.tileLayer}/{z}/{x}/{y}.mvt`;
             map.addSource(src, {
               type: "vector",
-              tiles: [`${apiBase()}/tiles/${layer.tileLayer}/{z}/{x}/{y}.mvt`],
+              tiles: [tileUrl],
               minzoom: layer.tileLayer === "pipelines" ? 4 : 0,
               maxzoom: 14,
               promoteId: mvtPromoteId(layer.tileLayer!),
@@ -1630,7 +1635,7 @@ export default function IntelligenceMap({
         ];
         let lastTick = 0;
         const animate = (now: number) => {
-          if (cancelled) return;
+          if (isStale()) return;
           if (now - lastTick > 90) {
             lastTick = now;
             if (map.getLayer("vessel-track")) {
@@ -1670,7 +1675,7 @@ export default function IntelligenceMap({
         // kill the live overlay for already-open tabs.
         let wsRetryMs = 2000;
         const connectWs = () => {
-          if (cancelled) return;
+          if (isStale()) return;
           try {
             ws = new WebSocket(wsUrl);
           } catch {
@@ -1679,7 +1684,7 @@ export default function IntelligenceMap({
           }
           ws.binaryType = "arraybuffer";
           ws.onmessage = (ev) => {
-            if (cancelled) return;
+            if (isStale()) return;
             setLastWsAt(new Date().toISOString());
             const payload = ev.data instanceof ArrayBuffer ? ev.data : (ev.data as string);
             const msg = parseWsFrame(payload);
@@ -1691,7 +1696,7 @@ export default function IntelligenceMap({
             }
           };
           ws.onopen = () => {
-            if (cancelled) {
+            if (isStale()) {
               ws?.close();
               return;
             }
@@ -1699,7 +1704,7 @@ export default function IntelligenceMap({
             setWsState("connected");
             setVesselLayerVisibility(map, !!layers.vessels, true);
             const sendSub = () => {
-              if (cancelled) return;
+              if (isStale()) return;
               if (ws?.readyState !== WebSocket.OPEN) return;
               const b = map.getBounds();
               ws.send(JSON.stringify({
@@ -1715,11 +1720,11 @@ export default function IntelligenceMap({
             sendSub();
           };
           ws.onclose = () => {
-            if (cancelled) return;
+            if (isStale()) return;
             setWsState("disconnected");
             setVesselLayerVisibility(map, !!layers.vessels, false);
             vesselMotion?.clear(); // empties live source + restores full tile filter
-            if (!cancelled) {
+            if (!isStale()) {
               wsRetryTimer = setTimeout(connectWs, wsRetryMs);
               wsRetryMs = Math.min(wsRetryMs * 2, 30000);
             }
@@ -1732,14 +1737,17 @@ export default function IntelligenceMap({
       }
     };
 
-    if (map.loaded()) {
-      setupMap();
-    } else {
-      map.once("load", setupMap);
-    }
+    map.once("style.load", () => {
+      if (isStale()) return;
+      try {
+        setupMap();
+      } catch (err) {
+        console.error("[IntelligenceMap] setupMap failed", err);
+      }
+    });
 
     return () => {
-      cancelled = true;
+      mapSetupGen.current += 1;
       cancelAnimationFrame(animFrame);
       if (wsRetryTimer) clearTimeout(wsRetryTimer);
       if (moveEndHandler) map.off("moveend", moveEndHandler);
@@ -1779,7 +1787,7 @@ export default function IntelligenceMap({
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map) return;
+    if (!map || !map.isStyleLoaded()) return;
     const src = map.getSource("rel-lines") as maplibregl.GeoJSONSource | undefined;
     if (src) {
       src.setData(relationshipLines ?? { type: "FeatureCollection", features: [] });
@@ -1813,7 +1821,7 @@ export default function IntelligenceMap({
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map) return;
+    if (!map || !map.isStyleLoaded()) return;
 
     let exitTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -1871,7 +1879,7 @@ export default function IntelligenceMap({
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map) return;
+    if (!map || !map.isStyleLoaded()) return;
     layersForVertical(vertical).forEach((l) => {
       if (l.id === "pipelines") {
         const vis = layers[l.id] && !layerLocked(l, entitlements) ? "visible" : "none";
