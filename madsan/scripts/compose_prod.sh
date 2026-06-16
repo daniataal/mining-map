@@ -2,7 +2,7 @@
 # MadSan production compose — the ONLY supported entry point for prod VM stack.
 #
 # Brings up: madsan-db, madsan-api, madsan-worker, madsan-scheduler, madsan-frontend,
-# caddy (--profile proxy), optional madsan-ais-ingest (--profile ais).
+# caddy (--profile proxy), optional madsan-ais-ingest (--profile ais when AISSTREAM_API_KEY set).
 #
 # Usage (from repo root or madsan/):
 #   ./madsan/scripts/compose_prod.sh --profile proxy up -d
@@ -51,4 +51,20 @@ cd "$DEPLOY_DIR"
 
 COMPOSE=(docker compose -p madsan -f docker-compose.yml -f docker-compose.prod.yml)
 
-exec "${COMPOSE[@]}" "$@"
+ARGS=("$@")
+if [[ -n "${AISSTREAM_API_KEY:-}" ]]; then
+  ais_profile_set=false
+  i=0
+  while (( i < ${#ARGS[@]} )); do
+    if [[ "${ARGS[i]}" == "--profile" ]] && [[ "${ARGS[i+1]:-}" == "ais" ]]; then
+      ais_profile_set=true
+      break
+    fi
+    ((i++)) || true
+  done
+  if [[ "$ais_profile_set" == "false" ]]; then
+    ARGS=(--profile ais "${ARGS[@]}")
+  fi
+fi
+
+exec "${COMPOSE[@]}" "${ARGS[@]}"

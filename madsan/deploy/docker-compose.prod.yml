@@ -1,7 +1,8 @@
 # MadSan V2 — production overlay for a ~23 GiB linux/arm64 VM.
 #
-# Stack memory budget (limits): ~7.2 GiB — leaves headroom for OS, journald, and
-# host-side legacy mining-db. Tune via MADSAN_*_MEM_LIMIT in deploy/.env.
+# Stack memory budget (limits): ~7.2 GiB without AIS, ~7.7 GiB with madsan-ais-ingest
+# (--profile ais when AISSTREAM_API_KEY is set). Leaves headroom on a ~23 GiB ARM VM.
+# Tune via MADSAN_*_MEM_LIMIT in deploy/.env.
 #
 # Usage (from repo root):
 #   cp madsan/deploy/.env.example madsan/deploy/.env   # secrets + LEGACY_DATABASE_URL

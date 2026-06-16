@@ -223,6 +223,88 @@ Deploy steps on the VM:
 
 **First run:** if `/opt/madsan` is missing or not a git checkout, deploy auto-bootstraps (clone or legacy symlink), creates `.env` from `.env.example` when absent, and seeds empty prod volumes. Existing `madsan/deploy/.env` on the VM is never overwritten.
 
+## Enable live AIS on prod
+
+Live AIS is **optional** and **off by default** until `AISSTREAM_API_KEY` is set in `madsan/deploy/.env` on the VM. Free key: [aisstream.io](https://aisstream.io/).
+
+When the key is present (non-empty), `deploy_prod_vm.sh` and `compose_prod.sh` automatically add `--profile ais`, which starts `madsan-ais-ingest` (`/app/ais-ingest` in the shared `madsan-api` image). The API disables legacy 2-hop AIS sync when the key is set.
+
+### Performance guardrails
+
+| Concern | Behavior |
+|---------|----------|
+| **Map MVT / bbox** | Vessel tiles read `vessels` (GIST on `geom`, `last_seen_at` window) — **not** `ais_positions`. Ingest does not run inside the API container. |
+| **DB writes** | `ais-ingest` upserts `vessels` per frame; `ais_positions` throttled to **≥90s per MMSI** (`MADSAN_AIS_POSITION_MIN_SEC`). Retention purge every 6h (`MADSAN_AIS_RETAIN_DAYS`, default 30). |
+| **Scheduler** | `port_call_sweep` every 6h reads recent `ais_positions` — light batch; no change needed when enabling AIS. |
+| **Resource limits** | Prod overlay: **512m** RAM, **0.5 CPU** (`MADSAN_AIS_INGEST_MEM_LIMIT`, `MADSAN_AIS_INGEST_CPUS` in `.env`). Total compose limits ~7.7 GiB with AIS on a ~23 GiB VM. |
+| **Live WS** | API `LISTEN vessel_delta` from ingest NOTIFY — small extra API load; separate from tile path. |
+
+**What to monitor after enable**
+
+```bash
+# Container health and memory (expect madsan-madsan-ais-ingest-1)
+docker stats --no-stream madsan-madsan-ais-ingest-1 madsan-madsan-db-1 madsan-madsan-api-1
+free -h
+
+# Ingest logs (subscription boxes, reconnects, retention purge)
+docker logs --tail 50 madsan-madsan-ais-ingest-1
+
+# DB: recent positions and provider health (read-only)
+docker exec madsan-madsan-db-1 psql -U postgres -d madsan_db -c \
+  "SELECT source, status, observation_count, last_observation_at FROM maritime_source_health;"
+docker exec madsan-madsan-db-1 psql -U postgres -d madsan_db -c \
+  "SELECT COUNT(*) AS positions_24h FROM ais_positions WHERE ts > now() - interval '24 hours';"
+
+# Map/API smoke
+curl -fsS http://127.0.0.1/health
+```
+
+Rollback: remove or comment out `AISSTREAM_API_KEY` in `.env`, redeploy (ais container stops; `deploy_prod_vm.sh` skips `--profile ais`). Vessel rows already written remain; legacy sync can be re-enabled with `MADSAN_AIS_SYNC=true` only if you intentionally return to 2-hop mode.
+
+### Coverage caveats (required UI honesty)
+
+Open AIS via AISStream is **sparse in the Persian Gulf, Strait of Hormuz, and Gulf of Oman**. An empty vessel layer there is **limited provider coverage**, not proof of no traffic. The frontend and `/api/admin/health/runtime` already surface this disclaimer.
+
+Ingest subscribes only to bounding boxes around terminal/port assets in `madsan_db` (not global AIS). Relevant tanker-like vessels near those assets are filtered server-side.
+
+### Steps on the VM
+
+1. Edit secrets on the host only (never commit):
+
+   ```bash
+   nano /opt/madsan/madsan/deploy/.env
+   # AISSTREAM_API_KEY=<your key from aisstream.io>
+   ```
+
+2. Redeploy (GitHub **MadSan deploy** workflow, or on-VM):
+
+   ```bash
+   cd /opt/madsan
+   ./madsan/scripts/deploy_prod_vm.sh
+   # OR manual:
+   ./madsan/scripts/compose_prod.sh --profile proxy pull
+   ./madsan/scripts/compose_prod.sh --profile proxy up -d --wait
+   ```
+
+   `compose_prod.sh` adds `--profile ais` automatically when the key is non-empty; you do not need to pass `--profile ais` manually.
+
+3. Verify `madsan-madsan-ais-ingest-1` is running and logs show `ais ingest subscribing to AISStream`.
+
+**Current prod check (2026-06):** VM has `AISSTREAM_API_KEY` line in `.env` but **value is empty** — AIS ingest is correctly **not** running. Add the key, then redeploy.
+
+### Optional ARM tuning (`.env`)
+
+Only if `docker stats` shows pressure after 24–48h of live ingest:
+
+| Variable | Default | Tighter on small ARM |
+|----------|---------|----------------------|
+| `MADSAN_AIS_INGEST_MEM_LIMIT` | `512m` | `384m` |
+| `MADSAN_AIS_INGEST_CPUS` | `0.5` | `0.25` |
+| `MADSAN_AIS_POSITION_MIN_SEC` | `90` | `120` (fewer `ais_positions` rows) |
+| `MADSAN_AIS_RETAIN_DAYS` | `30` | `14` (smaller history table) |
+
+Do not lower `MADSAN_DB_MEM_LIMIT` below `4g` while AIS is on unless you have measured headroom and accept slower tile queries under load.
+
 ## Image cleanup strategy
 
 After a successful health check, the deploy script:
