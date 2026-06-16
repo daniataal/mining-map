@@ -219,6 +219,21 @@ else
   echo "WARN: secrets sync script not found — skipping GitHub secrets → VM .env sync"
 fi
 
+VALIDATE_SCRIPT=""
+if [ -f "${REPO_ROOT}/madsan/scripts/validate_deploy_env.py" ]; then
+  VALIDATE_SCRIPT="${REPO_ROOT}/madsan/scripts/validate_deploy_env.py"
+elif [ -f "${REPO_ROOT}/scripts/validate_deploy_env.py" ]; then
+  VALIDATE_SCRIPT="${REPO_ROOT}/scripts/validate_deploy_env.py"
+fi
+if [ -n "${VALIDATE_SCRIPT}" ]; then
+  if ! python3 "${VALIDATE_SCRIPT}" "${ENV_FILE}"; then
+    echo "ERROR: ${ENV_FILE} failed validation — fix quoting/whitespace before deploy"
+    exit 1
+  fi
+else
+  echo "WARN: validate_deploy_env.py not found — skipping .env validation"
+fi
+
 if grep -Eq '^AISSTREAM_API_KEY=.+$' "${ENV_FILE}"; then
   echo "AISSTREAM_API_KEY now set - enabling ais profile"
 else

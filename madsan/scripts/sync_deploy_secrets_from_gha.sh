@@ -40,6 +40,22 @@ from pathlib import Path
 env_file = Path(os.environ["ENV_FILE"])
 env_example = Path(os.environ.get("ENV_EXAMPLE", str(env_file.with_suffix(".env.example"))))
 key_re = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
+needs_quotes_re = re.compile(r'[\s#"$`\\!&|;\'()<>*?\[\]{}]')
+
+
+def sanitize_secret(val: str) -> str:
+    val = val.strip().replace("\r", "").replace("\n", "")
+    if len(val) >= 2 and val[0] == val[-1] and val[0] in ('"', "'"):
+        val = val[1:-1]
+    return val
+
+
+def format_env_line(key: str, val: str) -> str:
+    val = sanitize_secret(val)
+    if needs_quotes_re.search(val) or not val:
+        escaped = val.replace("\\", "\\\\").replace('"', '\\"')
+        return f'{key}="{escaped}"'
+    return f"{key}={val}"
 
 
 def upsert_keys(path: Path, updates: dict[str, str]) -> None:
@@ -56,14 +72,14 @@ def upsert_keys(path: Path, updates: dict[str, str]) -> None:
         m = key_re.match(line.strip())
         if m and m.group(1) in updates:
             key = m.group(1)
-            new_lines.append(f"{key}={updates[key]}")
+            new_lines.append(format_env_line(key, updates[key]))
             seen.add(key)
         else:
             new_lines.append(line)
 
     for key, val in updates.items():
         if key not in seen:
-            new_lines.append(f"{key}={val}")
+            new_lines.append(format_env_line(key, val))
 
     path.write_text("\n".join(new_lines).rstrip() + "\n", encoding="utf-8")
 

@@ -41,18 +41,15 @@ for arg in "$@"; do
 done
 
 if [[ -f "$ENV_FILE" ]]; then
-  set -a
-  # shellcheck disable=SC1090
-  source "$ENV_FILE"
-  set +a
+  COMPOSE=(docker compose -p madsan --env-file "$ENV_FILE" -f docker-compose.yml -f docker-compose.prod.yml)
+else
+  COMPOSE=(docker compose -p madsan -f docker-compose.yml -f docker-compose.prod.yml)
 fi
 
 cd "$DEPLOY_DIR"
 
-COMPOSE=(docker compose -p madsan -f docker-compose.yml -f docker-compose.prod.yml)
-
 ARGS=("$@")
-if [[ -n "${AISSTREAM_API_KEY:-}" ]]; then
+if grep -Eq '^AISSTREAM_API_KEY=.+' "$ENV_FILE" 2>/dev/null; then
   ais_profile_set=false
   i=0
   while (( i < ${#ARGS[@]} )); do
