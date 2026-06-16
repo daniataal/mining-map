@@ -101,7 +101,27 @@ MadSan deploy uses these **SSH and registry secrets** (repository Settings → S
 
 Optional aliases (only if `REMOTE_*` is not set): `MADSAN_DEPLOY_HOST`, `MADSAN_DEPLOY_SSH_KEY`.
 
-**Do not** add MadSan-specific GitHub secrets for API keys (`AISSTREAM_API_KEY`, `GROQ_API_KEY`, `EIA_API_KEY`, etc.). Those belong in **`madsan/deploy/.env` on the VM only** — the deploy workflow never reads them from GitHub.
+MadSan deploy syncs **selected API-key secrets from GitHub** into the VM at **`/opt/madsan/madsan/deploy/.env`** on every deploy.
+
+It **upserts only non-empty** GitHub secret values (so it never overwrites an existing VM value with an empty secret), and it **never logs secret values**.
+
+**Secret mapping (GitHub → VM `.env`)**
+
+| GitHub secret | VM var written (upsert when non-empty) |
+|--------------|-------------------------------------------|
+| `AISSTREAM_API_KEY` | `AISSTREAM_API_KEY` |
+| `EIA_API_KEY` | `EIA_API_KEY` |
+| `OPENSANCTIONS_API_KEY` | `OPENSANCTIONS_API_KEY` |
+| `GROQ_AI_API_KEY` | `GROQ_API_KEY` |
+| `OPENROUTER_AI_API_KEY` | `OPENROUTER_API_KEY` |
+| `COMTRADE_API_KEY` | `COMTRADE_API_KEY` |
+| `COMTRADE_API_KEY_SECONDARY` | `COMTRADE_API_KEY_SECONDARY` |
+| `SHIPVAULT_REFRESH_TOKEN` | `SHIPVAULT_REFRESH_TOKEN` |
+| `SHIPVAULT_BEARER_TOKEN` | `SHIPVAULT_BEARER_TOKEN` |
+| `SHIPVAULT_SESSION_JSON` | `SHIPVAULT_SESSION_JSON` |
+| `SHIPVAULT_EMAIL` | `SHIPVAULT_EMAIL` |
+| `SHIPVAULT_PASSWORD` | `SHIPVAULT_PASSWORD` |
+| `SHIPVAULT_FIREBASE_API_KEY` | `SHIPVAULT_FIREBASE_API_KEY` |
 
 Optional repo **variable** (not secret): `MADSAN_NEXT_PUBLIC_API_URL` — baked into the frontend image at publish time; should match `NEXT_PUBLIC_API_URL` in `deploy/.env` on the VM.
 
@@ -259,7 +279,7 @@ docker exec madsan-madsan-db-1 psql -U postgres -d madsan_db -c \
 curl -fsS http://127.0.0.1/health
 ```
 
-Rollback: remove or comment out `AISSTREAM_API_KEY` in `.env`, redeploy (ais container stops; `deploy_prod_vm.sh` skips `--profile ais`). Vessel rows already written remain; legacy sync can be re-enabled with `MADSAN_AIS_SYNC=true` only if you intentionally return to 2-hop mode.
+Rollback: clear the GitHub secret `AISSTREAM_API_KEY` (or set it empty) and redeploy (ais container stops; `deploy_prod_vm.sh` skips `--profile ais`). Vessel rows already written remain; legacy sync can be re-enabled with `MADSAN_AIS_SYNC=true` only if you intentionally return to 2-hop mode.
 
 ### Coverage caveats (required UI honesty)
 
@@ -269,28 +289,24 @@ Ingest subscribes only to bounding boxes around terminal/port assets in `madsan_
 
 ### Steps on the VM
 
-1. Edit secrets on the host only (never commit):
+1. Rerun **GitHub Actions → MadSan deploy** (recommended). The workflow syncs non-empty GitHub secrets into `/opt/madsan/madsan/deploy/.env` and then redeploys the stack with `--profile ais` when `AISSTREAM_API_KEY` is set.
+
+   If your current VM has an `AISSTREAM_API_KEY` line with an empty value, you must re-run deploy after this workflow change is pushed.
+
+2. Optional SSH verification (no editing keys on the host):
 
    ```bash
-   nano /opt/madsan/madsan/deploy/.env
-   # AISSTREAM_API_KEY=<your key from aisstream.io>
-   ```
-
-2. Redeploy (GitHub **MadSan deploy** workflow, or on-VM):
-
-   ```bash
+   ssh -i ~/Downloads/MadSan-Global-Intelligence-vm-keys/ssh-key-2026-02-11.key ubuntu@YOUR_VM_HOST
    cd /opt/madsan
-   ./madsan/scripts/deploy_prod_vm.sh
-   # OR manual:
-   ./madsan/scripts/compose_prod.sh --profile proxy pull
-   ./madsan/scripts/compose_prod.sh --profile proxy up -d --wait
+   docker logs --tail 50 madsan-madsan-ais-ingest-1
    ```
 
-   `compose_prod.sh` adds `--profile ais` automatically when the key is non-empty; you do not need to pass `--profile ais` manually.
+3. Confirm:
 
-3. Verify `madsan-madsan-ais-ingest-1` is running and logs show `ais ingest subscribing to AISStream`.
-
-**Current prod check (2026-06):** VM has `AISSTREAM_API_KEY` line in `.env` but **value is empty** — AIS ingest is correctly **not** running. Add the key, then redeploy.
+   ```bash
+   curl -fsS http://127.0.0.1/health
+   ./madsan/scripts/compose_prod.sh ps | rg -n "ais-ingest|madsan-ais-ingest" || true
+   ```
 
 ### Optional ARM tuning (`.env`)
 
@@ -324,7 +340,7 @@ MadSan prod compose sets `name: madsan` in `madsan/deploy/docker-compose.yml`. U
 | Path `/opt/mining-map` | Path `/opt/madsan` |
 | Manual VM deploy / legacy CI (removed) | Workflow `madsan-deploy.yml` (auto after CI on `main`/`paperclip2`, or `workflow_dispatch`) |
 | Registry images `dannyatalla/mining-*` | Registry images `dannyatalla/madsan-api`, `dannyatalla/madsan-frontend` (pull on VM; fallback build) |
-| GitHub injects API keys at deploy | API keys in `madsan/deploy/.env` only |
+| GitHub injects API keys at deploy | GitHub secrets sync into `madsan/deploy/.env` (upsert non-empty) |
 
 ## Troubleshooting
 

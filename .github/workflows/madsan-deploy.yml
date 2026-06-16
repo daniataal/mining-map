@@ -157,6 +157,20 @@ jobs:
           LEGACY_DEPLOY_PATH: /opt/mining-map
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_TOKEN: ${{ github.token }}
+          # GitHub secret env vars (syncs into /opt/madsan/madsan/deploy/.env on the VM).
+          AISSTREAM_API_KEY: ${{ secrets.AISSTREAM_API_KEY }}
+          EIA_API_KEY: ${{ secrets.EIA_API_KEY }}
+          OPENSANCTIONS_API_KEY: ${{ secrets.OPENSANCTIONS_API_KEY }}
+          GROQ_AI_API_KEY: ${{ secrets.GROQ_AI_API_KEY }}
+          OPENROUTER_AI_API_KEY: ${{ secrets.OPENROUTER_AI_API_KEY }}
+          COMTRADE_API_KEY: ${{ secrets.COMTRADE_API_KEY }}
+          COMTRADE_API_KEY_SECONDARY: ${{ secrets.COMTRADE_API_KEY_SECONDARY }}
+          SHIPVAULT_REFRESH_TOKEN: ${{ secrets.SHIPVAULT_REFRESH_TOKEN }}
+          SHIPVAULT_BEARER_TOKEN: ${{ secrets.SHIPVAULT_BEARER_TOKEN }}
+          SHIPVAULT_SESSION_JSON: ${{ secrets.SHIPVAULT_SESSION_JSON }}
+          SHIPVAULT_EMAIL: ${{ secrets.SHIPVAULT_EMAIL }}
+          SHIPVAULT_PASSWORD: ${{ secrets.SHIPVAULT_PASSWORD }}
+          SHIPVAULT_FIREBASE_API_KEY: ${{ secrets.SHIPVAULT_FIREBASE_API_KEY }}
         with:
           host: ${{ secrets.REMOTE_HOST || secrets.MADSAN_DEPLOY_HOST }}
           # Oracle ARM prod VM rejects opc — must SSH as ubuntu (all 15 prior deploys failed in ~3s with opc).
@@ -164,7 +178,7 @@ jobs:
           key: ${{ secrets.REMOTE_SSH_KEY || secrets.MADSAN_DEPLOY_SSH_KEY }}
           port: 22
           command_timeout: 15m
-          envs: DEPLOY_SHA,DEPLOY_REF,IMAGE_TAG,MADSAN_DEPLOY_PATH,LEGACY_DEPLOY_PATH,GITHUB_REPOSITORY,GITHUB_TOKEN
+          envs: DEPLOY_SHA,DEPLOY_REF,IMAGE_TAG,MADSAN_DEPLOY_PATH,LEGACY_DEPLOY_PATH,GITHUB_REPOSITORY,GITHUB_TOKEN,AISSTREAM_API_KEY,EIA_API_KEY,OPENSANCTIONS_API_KEY,GROQ_AI_API_KEY,OPENROUTER_AI_API_KEY,COMTRADE_API_KEY,COMTRADE_API_KEY_SECONDARY,SHIPVAULT_REFRESH_TOKEN,SHIPVAULT_BEARER_TOKEN,SHIPVAULT_SESSION_JSON,SHIPVAULT_EMAIL,SHIPVAULT_PASSWORD,SHIPVAULT_FIREBASE_API_KEY
           script_stop: true
           script: |
             /bin/bash -euo pipefail <<'EOF'

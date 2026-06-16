@@ -202,6 +202,29 @@ if [ ! -r "${ENV_FILE}" ]; then
 fi
 echo "ENV_FILE=${ENV_FILE} exists=$(test -f "${ENV_FILE}" && echo yes || echo no) readable=$(test -r "${ENV_FILE}" && echo yes || echo no)"
 
+_step "sync deploy secrets from GitHub Actions"
+# The GitHub Actions deploy job passes select API keys as environment variables (no secret values printed).
+# This script upserts ONLY non-empty values into ${ENV_FILE}.
+SYNC_SCRIPT=""
+if [ -f "${REPO_ROOT}/madsan/scripts/sync_deploy_secrets_from_gha.sh" ]; then
+  SYNC_SCRIPT="${REPO_ROOT}/madsan/scripts/sync_deploy_secrets_from_gha.sh"
+elif [ -f "${REPO_ROOT}/scripts/sync_deploy_secrets_from_gha.sh" ]; then
+  SYNC_SCRIPT="${REPO_ROOT}/scripts/sync_deploy_secrets_from_gha.sh"
+fi
+
+if [ -n "${SYNC_SCRIPT}" ]; then
+  chmod +x "${SYNC_SCRIPT}" 2>/dev/null || true
+  bash "${SYNC_SCRIPT}" "${ENV_FILE}"
+else
+  echo "WARN: secrets sync script not found — skipping GitHub secrets → VM .env sync"
+fi
+
+if grep -Eq '^AISSTREAM_API_KEY=.+$' "${ENV_FILE}"; then
+  echo "AISSTREAM_API_KEY now set - enabling ais profile"
+else
+  echo "AISSTREAM_API_KEY still empty - AIS ingest stays disabled"
+fi
+
 NEED_SEED=false
 if _volume_is_empty madsan_raw_data; then
   NEED_SEED=true
