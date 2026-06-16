@@ -53,6 +53,11 @@ func (s *Service) ServeMVT(w http.ResponseWriter, r *http.Request) {
 	mvtGeom := `ST_AsMVTGeom(ST_Transform(geom::geometry, 3857), ST_TileEnvelope($1,$2,$3), 4096, 256, true)`
 	switch layer {
 	case "vessels":
+		if z < vesselMinZoom {
+			w.Header().Set("Content-Type", "application/vnd.mapbox-vector-tile")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
 		// Positions are live-only: vessels without AIS in the freshness window are
 		// excluded (registry-only entries stay in the DB for dossiers/search, not the map).
 		// ais_age_h lets the client dim older positions. DB enrichment (ShipVault
@@ -166,7 +171,8 @@ func (s *Service) ServeMVT(w http.ResponseWriter, r *http.Request) {
 	cache := "public, max-age=300"
 	switch layer {
 	case "vessels":
-		cache = "public, max-age=30"
+		// Short TTL: tiles are the WS-off fallback; live overlay owns smooth motion when connected.
+		cache = "public, max-age=10"
 	case "energy-assets", "energy-cadastre", "metals-assets", "pipelines":
 		cache = "public, max-age=120"
 	}

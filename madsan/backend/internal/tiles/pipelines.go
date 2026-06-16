@@ -127,4 +127,7 @@ func pipelineSubstanceCase(tagsRef string) string {
 		END`
 }
 
-const pipelineMinZoom = 4
+const (
+	pipelineMinZoom = 4
+	vesselMinZoom   = 4
+)

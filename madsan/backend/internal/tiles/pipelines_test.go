@@ -9,6 +9,9 @@ func TestPipelineMinZoom(t *testing.T) {
 	if pipelineMinZoom != 4 {
 		t.Fatalf("pipelineMinZoom = %d, want 4", pipelineMinZoom)
 	}
+	if vesselMinZoom != 4 {
+		t.Fatalf("vesselMinZoom = %d, want 4", vesselMinZoom)
+	}
 }
 
 func TestPipelineGraphMVTQueryPresent(t *testing.T) {

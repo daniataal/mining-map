@@ -481,12 +481,12 @@ function addLiveVesselLayers(map: maplibregl.Map, visible: boolean) {
 }
 
 /**
- * MVT tiles are the stored-intelligence base (all vessels, regardless of AIS freshness).
- * The live overlay adds fresh WS positions on top; tile copies of live vessels are
- * filtered out by MMSI (setVesselTileExclusion) so nothing draws twice (no bloom).
+ * WS connected: GeoJSON live overlay only — MVT layers hidden so MapLibre stops
+ * fetching heavy vessel tiles (join + track bearing) on every pan.
+ * WS down: MVT fallback for last-known positions (<72h); live source cleared.
  */
 function setVesselLayerVisibility(map: maplibregl.Map, visible: boolean, liveConnected: boolean) {
-  const tileVis = visible ? "visible" : "none";
+  const tileVis = visible && !liveConnected ? "visible" : "none";
   const liveVis = visible && liveConnected ? "visible" : "none";
   const setIfPresent = (lid: string, visibility: "visible" | "none") => {
     try {
@@ -1122,7 +1122,8 @@ export default function IntelligenceMap({
             map.addSource(src, {
               type: "vector",
               tiles: [tileUrl],
-              minzoom: layer.tileLayer === "pipelines" ? 4 : 0,
+              minzoom:
+                layer.tileLayer === "pipelines" || layer.tileLayer === "vessels" ? 4 : 0,
               maxzoom: 14,
               promoteId: mvtPromoteId(layer.tileLayer!),
             });
@@ -1648,7 +1649,7 @@ export default function IntelligenceMap({
         animFrame = requestAnimationFrame(animate);
 
         const liveSrc = () => map.getSource("live-vessels") as maplibregl.GeoJSONSource | undefined;
-        let liveMmsiKey = "";
+        let wsSnapshotBootstrapped = false;
         vesselMotion = new VesselDeadReckoning({
           getBbox: () => {
             const b = map.getBounds();
@@ -1657,16 +1658,6 @@ export default function IntelligenceMap({
           onFeatures: (features) => {
             const src = liveSrc();
             if (src) src.setData({ type: "FeatureCollection", features });
-            // Dedupe tiles vs live overlay only when membership changes (not per animation frame).
-            const mmsis = features
-              .map((f) => String(f.properties?.mmsi ?? ""))
-              .filter(Boolean)
-              .sort();
-            const key = mmsis.join(",");
-            if (key !== liveMmsiKey) {
-              liveMmsiKey = key;
-              setVesselTileExclusion(map, mmsis);
-            }
           },
         });
 
@@ -1690,7 +1681,12 @@ export default function IntelligenceMap({
             const msg = parseWsFrame(payload);
             if (!msg) return;
             if (msg.type === "snapshot" && Array.isArray(msg.vessels)) {
-              vesselMotion?.replaceAll(msg.vessels);
+              if (!wsSnapshotBootstrapped) {
+                wsSnapshotBootstrapped = true;
+                vesselMotion?.replaceAll(msg.vessels);
+              } else {
+                vesselMotion?.mergeAll(msg.vessels);
+              }
             } else if (msg.type === "delta" && msg.entity === "vessel" && msg.data?.mmsi) {
               vesselMotion?.upsert(msg.data);
             }
@@ -1700,8 +1696,10 @@ export default function IntelligenceMap({
               ws?.close();
               return;
             }
+            wsSnapshotBootstrapped = false;
             wsRetryMs = 2000;
             setWsState("connected");
+            setVesselTileExclusion(map, []);
             setVesselLayerVisibility(map, !!layers.vessels, true);
             const sendSub = () => {
               if (isStale()) return;
@@ -1721,7 +1719,9 @@ export default function IntelligenceMap({
           };
           ws.onclose = () => {
             if (isStale()) return;
+            wsSnapshotBootstrapped = false;
             setWsState("disconnected");
+            setVesselTileExclusion(map, []);
             setVesselLayerVisibility(map, !!layers.vessels, false);
             vesselMotion?.clear(); // empties live source + restores full tile filter
             if (!isStale()) {
