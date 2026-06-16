@@ -20,7 +20,8 @@ export type BBox = [west: number, south: number, east: number, north: number];
 
 const KNOTS_TO_MPS = 0.514444;
 const EARTH_RADIUS_M = 6371000;
-const MAX_EXTRAPOLATION_MS = 60_000;
+/** Dead-reckon between AIS fixes (coastal stream often 2–4 min between reports). */
+const MAX_EXTRAPOLATION_MS = 180_000;
 /** Do not animate dead reckoning beyond live AIS window (matches backend LivePositionMaxAge). */
 const MAX_LIVE_POSITION_MS = 12 * 60 * 60 * 1000;
 const MIN_SPEED_KNOTS = 0.1;
@@ -215,6 +216,17 @@ export class VesselDeadReckoning {
     this.vessels.clear();
     for (const msg of msgs) {
       this.vessels.set(msg.mmsi, this.enrich(msg));
+    }
+    this.publishAndMaybeAnimate();
+  }
+
+  /** Merge snapshot rows without clearing in-flight dead reckoning (periodic WS refresh). */
+  mergeAll(msgs: VesselMsg[]): void {
+    for (const msg of msgs) {
+      const prev = this.vessels.get(msg.mmsi);
+      const observedAtMs = parseObservedAtMs(msg.last_seen_at);
+      if (prev && observedAtMs < prev.observedAtMs) continue;
+      this.vessels.set(msg.mmsi, this.enrich(msg, prev));
     }
     this.publishAndMaybeAnimate();
   }

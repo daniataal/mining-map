@@ -258,6 +258,15 @@ When the key is present (non-empty), `deploy_prod_vm.sh` and `compose_prod.sh` a
 | **Scheduler** | `port_call_sweep` every 6h reads recent `ais_positions` — light batch; no change needed when enabling AIS. |
 | **Resource limits** | Prod overlay: **512m** RAM, **0.5 CPU** (`MADSAN_AIS_INGEST_MEM_LIMIT`, `MADSAN_AIS_INGEST_CPUS` in `.env`). Total compose limits ~7.7 GiB with AIS on a ~23 GiB VM. |
 | **Live WS** | API `LISTEN vessel_delta` from ingest NOTIFY — small extra API load; separate from tile path. |
+| **Map first paint** | Frontend uses absolute `tileApiBase()` (not basemap-relative URLs). Energy-assets MVT registers first; cadastre/pipelines deferred one frame. Vessel MVT waits for WS (2.5s fallback) — when WS is connected the client removes the vessel MVT source to avoid duplicate tile fetches; live GeoJSON overlay covers viewport (&lt;12h). |
+| **WS vs MVT** | WS snapshot: bbox-limited, 200 vessels, &lt;12h (`SnapshotLive`). MVT vessels: tile-bounded, &lt;72h, 30s HTTP cache. On WS disconnect, MVT restores for stale last-known positions. |
+
+**Ingest vs map freshness tradeoff**
+
+| Variable | Default | Effect |
+|----------|---------|--------|
+| `MADSAN_AIS_POSITION_MIN_SEC` | `90` | Min interval between `ais_positions` history rows per MMSI (does not block `vessels` upsert). Higher = fewer history rows, slightly staler track/dossier history. |
+| `MADSAN_AIS_RETAIN_DAYS` | `30` | `ais_positions` retention purge interval. |
 
 **What to monitor after enable**
 

@@ -33,6 +33,13 @@ type client struct {
 	useMsgpack bool
 }
 
+// snapshotFallbackAfter is how long without a live delta before periodic viewport
+// snapshots resume (safety net when NOTIFY/listener is down).
+const snapshotFallbackAfter = 45 * time.Second
+
+// liveSnapshotLimit caps vessels per viewport WS snapshot (matches map density).
+const liveSnapshotLimit = 500
+
 type Hub struct {
 	log        zerolog.Logger
 	pool       *pgxpool.Pool
@@ -40,6 +47,8 @@ type Hub struct {
 	register   chan *client
 	unregister chan *client
 	mu         sync.RWMutex
+	deltaMu    sync.RWMutex
+	lastDeltaAt time.Time
 }
 
 func NewHub(log zerolog.Logger) *Hub {
@@ -87,11 +96,11 @@ func (h *Hub) pushHeartbeat() {
 	}
 }
 
-// refreshSnapshots re-sends viewport vessel snapshots so clients see fresh AIS
-// positions in direct-ingest mode, where the writer (cmd/ais-ingest) is a
-// separate process and no per-message delta reaches this hub.
+// refreshSnapshots re-sends viewport vessel snapshots when live deltas have
+// stalled (e.g. ais-ingest disconnected). Skipped while deltas are flowing so
+// clients can dead-reckon smoothly without full-state replace jitter.
 func (h *Hub) refreshSnapshots() {
-	if h.pool == nil {
+	if h.pool == nil || !h.deltasStalled() {
 		return
 	}
 	h.mu.RLock()
@@ -115,7 +124,7 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	useMsgpack := r.URL.Query().Get("format") == "msgpack"
-	c := &client{conn: conn, send: make(chan wsFrame, 64), useMsgpack: useMsgpack}
+	c := &client{conn: conn, send: make(chan wsFrame, 256), useMsgpack: useMsgpack}
 	h.register <- c
 	go c.writePump()
 	go c.readPump(h)
@@ -168,7 +177,7 @@ func (c *client) readPump(h *Hub) {
 func (h *Hub) sendSnapshot(c *client, sub ViewportSub) {
 	vessels := []maritime.VesselDelta{}
 	if h.pool != nil && sub.BBox[2] > sub.BBox[0] && sub.BBox[3] > sub.BBox[1] {
-		if snap, err := maritime.SnapshotLive(context.Background(), h.pool, sub.BBox, 200); err == nil {
+		if snap, err := maritime.SnapshotLive(context.Background(), h.pool, sub.BBox, liveSnapshotLimit); err == nil {
 			vessels = snap
 		}
 	}
@@ -189,6 +198,10 @@ func (c *client) writePump() {
 }
 
 func (h *Hub) PublishVesselDelta(d maritime.VesselDelta) {
+	h.deltaMu.Lock()
+	h.lastDeltaAt = time.Now()
+	h.deltaMu.Unlock()
+
 	payload := map[string]any{"type": "delta", "entity": "vessel", "data": d}
 	h.mu.RLock()
 	defer h.mu.RUnlock()
@@ -198,4 +211,13 @@ func (h *Hub) PublishVesselDelta(d maritime.VesselDelta) {
 		}
 		h.sendTo(c, payload)
 	}
+}
+
+func (h *Hub) deltasStalled() bool {
+	h.deltaMu.RLock()
+	defer h.deltaMu.RUnlock()
+	if h.lastDeltaAt.IsZero() {
+		return true
+	}
+	return time.Since(h.lastDeltaAt) >= snapshotFallbackAfter
 }

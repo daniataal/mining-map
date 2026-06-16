@@ -547,6 +547,131 @@ function mvtPromoteId(tileLayer: string): string {
   return tileLayer === "vessels" ? "mmsi" : "id";
 }
 
+const VESSEL_MVT_SOURCE = "src-vessels";
+/** Wait for WS before vessel MVT (dense); fallback if WS never connects. */
+const VESSEL_MVT_FALLBACK_MS = 2500;
+
+/** Lower = registered first — energy assets + vessels before cadastre/pipelines. */
+const TILE_SETUP_PRIORITY: Record<string, number> = {
+  "energy-assets": 0,
+  "metals-assets": 0,
+  vessels: 1,
+  "energy-cadastre": 3,
+  pipelines: 4,
+};
+
+const DEFERRED_TILE_LAYERS = new Set(["energy-cadastre", "pipelines"]);
+
+function sortedTileLayerDefs(vertical: "energy" | "metals"): LayerDef[] {
+  return layersForVertical(vertical)
+    .filter((l) => l.tileLayer && l.id !== "vessels" && (vertical === "energy" || l.vertical !== "energy"))
+    .sort((a, b) => {
+      const pa = TILE_SETUP_PRIORITY[a.tileLayer!] ?? 2;
+      const pb = TILE_SETUP_PRIORITY[b.tileLayer!] ?? 2;
+      if (pa !== pb) return pa - pb;
+      return a.id.localeCompare(b.id);
+    });
+}
+
+function immediateTileLayerDefs(vertical: "energy" | "metals"): LayerDef[] {
+  return sortedTileLayerDefs(vertical).filter((l) => !DEFERRED_TILE_LAYERS.has(l.tileLayer!));
+}
+
+function deferredTileLayerDefs(vertical: "energy" | "metals"): LayerDef[] {
+  return sortedTileLayerDefs(vertical).filter((l) => DEFERRED_TILE_LAYERS.has(l.tileLayer!));
+}
+
+function addMvtSource(
+  map: maplibregl.Map,
+  sourcesAdded: Set<string>,
+  tileLayer: string,
+  sourceKey: string,
+  minzoom = 0,
+) {
+  if (sourcesAdded.has(sourceKey)) return;
+  map.addSource(sourceKey, {
+    type: "vector",
+    tiles: [`${tileApiBase()}/tiles/${tileLayer}/{z}/{x}/{y}.mvt`],
+    minzoom: tileLayer === "pipelines" ? 4 : minzoom,
+    maxzoom: 14,
+    promoteId: mvtPromoteId(tileLayer),
+  });
+  sourcesAdded.add(sourceKey);
+}
+
+function attachDensityHeatForSource(
+  map: maplibregl.Map,
+  tileLayer: string,
+  src: string,
+  layersOn: Record<string, boolean>,
+) {
+  if (tileLayer === "energy-assets") {
+    addDensityHeatLayer(map, "energy-assets-heat", src, "energy_assets", [
+      "rgba(120,53,15,0.4)",
+      "rgba(217,119,6,0.6)",
+      "rgba(254,243,199,0.9)",
+    ]);
+    map.setFilter("energy-assets-heat", heatFilterForActiveLayers("energy", layersOn));
+  } else if (tileLayer === "metals-assets") {
+    addDensityHeatLayer(map, "metals-assets-heat", src, "metals_assets", [
+      "rgba(113,63,18,0.4)",
+      "rgba(202,138,4,0.6)",
+      "rgba(254,249,195,0.9)",
+    ]);
+    map.setFilter("metals-assets-heat", heatFilterForActiveLayers("metals", layersOn));
+  }
+}
+
+function registerTileLayerDef(
+  map: maplibregl.Map,
+  layer: LayerDef,
+  sourcesAdded: Set<string>,
+  layersOn: Record<string, boolean>,
+  vertical: "energy" | "metals",
+) {
+  if (!layer.tileLayer) return;
+  const src = mapSourceKey(layer);
+  if (!sourcesAdded.has(src)) {
+    addMvtSource(map, sourcesAdded, layer.tileLayer, src);
+    attachDensityHeatForSource(map, layer.tileLayer, src, layersOn);
+  }
+  if (layer.id === "pipelines") {
+    if (vertical === "energy") addPipelineLayers(map, src, !!layersOn[layer.id]);
+    return;
+  }
+  addPointTileLayer(map, layer, src, !!layersOn[layer.id]);
+}
+
+type VesselMvtApi = {
+  ensure: (visible: boolean) => void;
+  suppress: () => void;
+};
+
+function createVesselMvtApi(map: maplibregl.Map, isStale: () => boolean): VesselMvtApi {
+  let ready = false;
+  return {
+    ensure(visible: boolean) {
+      if (isStale()) return;
+      if (!ready) {
+        const added = new Set<string>();
+        addMvtSource(map, added, "vessels", VESSEL_MVT_SOURCE, 3);
+        addVesselTileLayers(map, VESSEL_MVT_SOURCE, "vessels", visible);
+        ready = true;
+        return;
+      }
+      setVesselLayerVisibility(map, visible, false);
+    },
+    suppress() {
+      if (!ready) return;
+      for (const lid of VESSEL_TILE_LAYERS) {
+        if (map.getLayer(lid)) map.removeLayer(lid);
+      }
+      if (map.getSource(VESSEL_MVT_SOURCE)) map.removeSource(VESSEL_MVT_SOURCE);
+      ready = false;
+    },
+  };
+}
+
 function energyAssetFilter(layer: LayerDef): maplibregl.FilterSpecification | undefined {
   if (!layer.assetTypes?.length) return undefined;
   if (layer.assetTypes.length === 1) {
@@ -1019,6 +1144,7 @@ export default function IntelligenceMap({
   const mapRef = useRef<maplibregl.Map | null>(null);
   /** Bumps on map effect cleanup so async `load` cannot run setup on a torn-down instance. */
   const mapSetupGen = useRef(0);
+  const vesselMvtApiRef = useRef<VesselMvtApi | null>(null);
   const hoverPopupRef = useRef<maplibregl.Popup | null>(null);
   const clickPopupRef = useRef<maplibregl.Popup | null>(null);
   const selectedFeatureRef = useRef<FeatureTarget | null>(null);
@@ -1102,6 +1228,7 @@ export default function IntelligenceMap({
 
     let ws: WebSocket | null = null;
     let wsRetryTimer: ReturnType<typeof setTimeout> | null = null;
+    let vesselMvtTimer: ReturnType<typeof setTimeout> | null = null;
     let moveEndHandler: (() => void) | null = null;
     let vesselMotion: VesselDeadReckoning | null = null;
     let animFrame = 0;
@@ -1113,49 +1240,21 @@ export default function IntelligenceMap({
       applyBasemapTuning(map, theme);
 
       const sourcesAdded = new Set<string>();
-      layersForVertical(vertical)
-        .filter((l) => l.tileLayer && (vertical === "energy" || l.vertical !== "energy"))
-        .forEach((layer) => {
-          const src = mapSourceKey(layer);
-          if (!sourcesAdded.has(src)) {
-            const tileUrl = `${tileApiBase()}/tiles/${layer.tileLayer}/{z}/{x}/{y}.mvt`;
-            map.addSource(src, {
-              type: "vector",
-              tiles: [tileUrl],
-              minzoom:
-                layer.tileLayer === "pipelines" || layer.tileLayer === "vessels" ? 4 : 0,
-              maxzoom: 14,
-              promoteId: mvtPromoteId(layer.tileLayer!),
-            });
-            sourcesAdded.add(src);
-            if (layer.tileLayer === "energy-assets") {
-              addDensityHeatLayer(map, "energy-assets-heat", src, "energy_assets", [
-                "rgba(120,53,15,0.4)",
-                "rgba(217,119,6,0.6)",
-                "rgba(254,243,199,0.9)",
-              ]);
-              map.setFilter("energy-assets-heat", heatFilterForActiveLayers("energy", layers));
-            } else if (layer.tileLayer === "metals-assets") {
-              addDensityHeatLayer(map, "metals-assets-heat", src, "metals_assets", [
-                "rgba(113,63,18,0.4)",
-                "rgba(202,138,4,0.6)",
-                "rgba(254,249,195,0.9)",
-              ]);
-              map.setFilter("metals-assets-heat", heatFilterForActiveLayers("metals", layers));
-            }
-          }
-          if (layer.id === "pipelines") {
-            if (vertical === "energy") {
-              addPipelineLayers(map, src, !!layers[layer.id]);
-            }
-            return;
-          }
-          if (layer.id === "vessels") {
-            addVesselTileLayers(map, src, mvtSourceLayer(layer.tileLayer!), !!layers[layer.id]);
-            return;
-          }
-          addPointTileLayer(map, layer, src, !!layers[layer.id]);
-        });
+      const vesselMvtApi = createVesselMvtApi(map, isStale);
+      vesselMvtApiRef.current = vesselMvtApi;
+
+      const registerTileDefs = (defs: LayerDef[]) => {
+        for (const layer of defs) {
+          registerTileLayerDef(map, layer, sourcesAdded, layers, vertical);
+        }
+      };
+
+      // Critical infrastructure first; cadastre/pipelines on next frame so basemap + assets paint sooner.
+      registerTileDefs(immediateTileLayerDefs(vertical));
+      requestAnimationFrame(() => {
+        if (isStale()) return;
+        registerTileDefs(deferredTileLayerDefs(vertical));
+      });
 
       const updateLayerCounts = () => {
         const counts: Record<string, number> = {};
@@ -1621,8 +1720,20 @@ export default function IntelligenceMap({
 
       if (vertical === "energy") {
         addLiveVesselLayers(map, !!layers.vessels);
-        // Default to MVT until WS connects — prevents double-render bloom on first paint.
+        // Default to live-only until WS connects or MVT fallback fires.
         setVesselLayerVisibility(map, !!layers.vessels, false);
+
+        let wsLiveActive = false;
+        const scheduleVesselMvtFallback = () => {
+          if (vesselMvtTimer) clearTimeout(vesselMvtTimer);
+          if (!layersRef.current.vessels) return;
+          vesselMvtTimer = setTimeout(() => {
+            if (isStale() || wsLiveActive || !layersRef.current.vessels) return;
+            vesselMvtApi.ensure(true);
+            setVesselLayerVisibility(map, true, false);
+          }, VESSEL_MVT_FALLBACK_MS);
+        };
+        scheduleVesselMvtFallback();
 
         // Marching dash on the focused vessel track only.
         const dashPhases: number[][] = [
@@ -1698,8 +1809,14 @@ export default function IntelligenceMap({
             }
             wsSnapshotBootstrapped = false;
             wsRetryMs = 2000;
-            setWsState("connected");
+            wsLiveActive = true;
+            if (vesselMvtTimer) {
+              clearTimeout(vesselMvtTimer);
+              vesselMvtTimer = null;
+            }
+            vesselMvtApi.suppress();
             setVesselTileExclusion(map, []);
+            setWsState("connected");
             setVesselLayerVisibility(map, !!layers.vessels, true);
             const sendSub = () => {
               if (isStale()) return;
@@ -1720,10 +1837,16 @@ export default function IntelligenceMap({
           ws.onclose = () => {
             if (isStale()) return;
             wsSnapshotBootstrapped = false;
+            wsLiveActive = false;
             setWsState("disconnected");
             setVesselTileExclusion(map, []);
             setVesselLayerVisibility(map, !!layers.vessels, false);
-            vesselMotion?.clear(); // empties live source + restores full tile filter
+            vesselMotion?.clear();
+            if (layersRef.current.vessels) {
+              vesselMvtApi.ensure(true);
+              setVesselLayerVisibility(map, true, false);
+            }
+            scheduleVesselMvtFallback();
             if (!isStale()) {
               wsRetryTimer = setTimeout(connectWs, wsRetryMs);
               wsRetryMs = Math.min(wsRetryMs * 2, 30000);
@@ -1748,8 +1871,10 @@ export default function IntelligenceMap({
 
     return () => {
       mapSetupGen.current += 1;
+      vesselMvtApiRef.current = null;
       cancelAnimationFrame(animFrame);
       if (wsRetryTimer) clearTimeout(wsRetryTimer);
+      if (vesselMvtTimer) clearTimeout(vesselMvtTimer);
       if (moveEndHandler) map.off("moveend", moveEndHandler);
       vesselMotion?.dispose();
       vesselMotion = null;
@@ -1903,7 +2028,18 @@ export default function IntelligenceMap({
       map.setFilter("metals-assets-heat", heatFilterForActiveLayers("metals", layers));
     }
     if (vertical === "energy") {
-      setVesselLayerVisibility(map, !!layers.vessels, wsState === "connected");
+      const vesselsOn = !!layers.vessels;
+      if (vesselsOn) {
+        if (wsState === "connected") {
+          vesselMvtApiRef.current?.suppress();
+          setVesselLayerVisibility(map, true, true);
+        } else {
+          vesselMvtApiRef.current?.ensure(true);
+          setVesselLayerVisibility(map, true, false);
+        }
+      } else {
+        setVesselLayerVisibility(map, false, false);
+      }
       for (const lid of [
         "sts-events",
         "sts-events-glow",

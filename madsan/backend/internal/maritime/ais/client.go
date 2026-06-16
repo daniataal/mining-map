@@ -80,7 +80,8 @@ func runStream(ctx context.Context, sub Subscription, handler StreamHandler, ins
 			return ctx.Err()
 		default:
 		}
-		_ = conn.SetReadDeadline(time.Now().Add(120 * time.Second))
+		// Sparse coastal AIS can be quiet for minutes; avoid reconnect churn that batches updates.
+		_ = conn.SetReadDeadline(time.Now().Add(300 * time.Second))
 		_, data, err := conn.ReadMessage()
 		if err != nil {
 			return fmt.Errorf("aisstream read: %w", err)
