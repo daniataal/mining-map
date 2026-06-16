@@ -26,11 +26,19 @@ type wsFrame struct {
 	typ     int
 }
 
+// viewportSnapshotDebounce coalesces pan/zoom sub updates into one DB gap-fill
+// snapshot after the viewport settles (avoids chunky per-moveend queries).
+const viewportSnapshotDebounce = 2 * time.Second
+
 type client struct {
 	conn       *websocket.Conn
 	sub        ViewportSub
 	send       chan wsFrame
 	useMsgpack bool
+
+	mu                sync.Mutex
+	snapshotReady     bool
+	viewportSnapTimer *time.Timer
 }
 
 // snapshotFallbackAfter is how long without a live delta before periodic viewport
@@ -76,6 +84,7 @@ func (h *Hub) Run() {
 		case c := <-h.unregister:
 			h.mu.Lock()
 			if _, ok := h.clients[c]; ok {
+				c.stopViewportSnapTimer()
 				delete(h.clients, c)
 				close(c.send)
 			}
@@ -168,10 +177,46 @@ func (c *client) readPump(h *Hub) {
 		}
 		var sub ViewportSub
 		if json.Unmarshal(msg, &sub) == nil {
-			c.sub = sub
-			h.sendSnapshot(c, sub)
+			h.onViewportSub(c, sub)
 		}
 	}
+}
+
+func (c *client) stopViewportSnapTimer() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.viewportSnapTimer != nil {
+		c.viewportSnapTimer.Stop()
+		c.viewportSnapTimer = nil
+	}
+}
+
+// onViewportSub updates the client bbox filter for live deltas. The first sub
+// bootstraps from DB; later subs debounce a gap-fill snapshot so panning does
+// not query Postgres on every moveend while stationary vessels still appear.
+func (h *Hub) onViewportSub(c *client, sub ViewportSub) {
+	c.sub = sub
+
+	c.mu.Lock()
+	if !c.snapshotReady {
+		c.snapshotReady = true
+		c.mu.Unlock()
+		h.sendSnapshot(c, sub)
+		return
+	}
+	if c.viewportSnapTimer != nil {
+		c.viewportSnapTimer.Stop()
+	}
+	c.viewportSnapTimer = time.AfterFunc(viewportSnapshotDebounce, func() {
+		c.mu.Lock()
+		c.viewportSnapTimer = nil
+		bbox := c.sub.BBox
+		c.mu.Unlock()
+		if bbox[2] > bbox[0] && bbox[3] > bbox[1] {
+			h.sendSnapshot(c, c.sub)
+		}
+	})
+	c.mu.Unlock()
 }
 
 func (h *Hub) sendSnapshot(c *client, sub ViewportSub) {

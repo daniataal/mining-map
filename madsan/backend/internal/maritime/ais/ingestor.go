@@ -118,6 +118,8 @@ func runCycle(ctx context.Context, pool *pgxpool.Pool, cfg config.Config, log ze
 			return nil
 		}
 		tclass := TankerClass(u.ShipTypeCode, u.ShipTypeLabel, u.Name)
+		// vessels row: every relevant frame (not throttled). ais_positions history
+		// is throttled separately via minInterval (MADSAN_AIS_POSITION_MIN_SEC).
 		vesselID, fresh, err := UpsertVessel(ctx, pool, u, tclass)
 		if err != nil {
 			log.Warn().Err(err).Int64("mmsi", u.MMSI).Msg("ais vessel upsert skipped")
