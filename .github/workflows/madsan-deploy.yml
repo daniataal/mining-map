@@ -297,13 +297,19 @@ jobs:
 
             _bootstrap_deploy_checkout
 
-            _step "checkout origin/main for compose files"
+            _step "sync deploy checkout to origin/main"
             cd "${DEPLOY_PATH}"
+            # Prod VMs must match git, not ad-hoc rsync/rebuild edits. Any uncommitted working-tree
+            # changes on the host are intentionally discarded on each deploy.
+            if [ -n "$(git status --porcelain 2>/dev/null || true)" ]; then
+              echo "WARN: discarding uncommitted VM working-tree changes before deploy sync"
+              git status --short || true
+            fi
             git fetch --tags origin
             # Compose/Caddy/deploy scripts come from main — not DEPLOY_SHA. App code ships in
             # registry images (IMAGE_TAG from publish); pinning git to publish SHA leaves the VM
             # on an old deploy script when fixes land on main after the publish run.
-            git checkout origin/main
+            git reset --hard origin/main
 
             if [ -f madsan/scripts/seed_prod_volumes.sh ]; then
               chmod +x madsan/scripts/seed_prod_volumes.sh
