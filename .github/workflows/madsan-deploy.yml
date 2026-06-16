@@ -14,8 +14,8 @@
 # PRs never deploy. Use workflow_dispatch for manual prod deploy.
 # Required GitHub secrets (repository Settings → Secrets):
 #   DOCKER_USERNAME, DOCKER_PASSWORD — registry push (madsan-publish.yml)
-#   REMOTE_HOST, REMOTE_USER, REMOTE_SSH_KEY — SSH deploy to prod VM
-# Optional aliases (used only when REMOTE_* is unset): MADSAN_DEPLOY_HOST, MADSAN_DEPLOY_USER, MADSAN_DEPLOY_SSH_KEY
+#   REMOTE_HOST, REMOTE_SSH_KEY — SSH deploy to prod VM (user is ubuntu on Oracle ARM; do not use opc)
+# Optional aliases (used only when REMOTE_* is unset): MADSAN_DEPLOY_HOST, MADSAN_DEPLOY_SSH_KEY
 # Optional repo variable: MADSAN_NEXT_PUBLIC_API_URL — baked into frontend at publish (match deploy/.env on VM)
 # Application API keys live in madsan/deploy/.env on the VM — not in GitHub.
 
@@ -31,6 +31,13 @@ on:
       - main
       - master
       - paperclip2
+  push:
+    branches:
+      - main
+      - master
+      - paperclip2
+    paths:
+      - .github/workflows/madsan-deploy.yml
   workflow_dispatch:
     inputs:
       ref:
@@ -61,6 +68,7 @@ jobs:
     runs-on: ubuntu-latest
     if: >
       github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'push' ||
       (
         github.event.workflow_run.conclusion == 'success' &&
         (
@@ -75,7 +83,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.event.workflow_run.head_sha }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.event_name == 'push' && github.sha || github.event.workflow_run.head_sha }}
           fetch-depth: 2
 
       - name: Resolve deploy SHA and image tag
@@ -84,6 +92,9 @@ jobs:
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "deploy_ref=${{ inputs.ref }}" >> "$GITHUB_OUTPUT"
             echo "image_tag=${{ inputs.image_tag }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            echo "deploy_ref=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+            echo "image_tag=latest" >> "$GITHUB_OUTPUT"
           else
             echo "deploy_ref=${{ github.event.workflow_run.head_branch }}" >> "$GITHUB_OUTPUT"
             echo "image_tag=v${{ github.event.workflow_run.run_number }}" >> "$GITHUB_OUTPUT"
@@ -99,7 +110,7 @@ jobs:
           fi
 
       - name: Verify backend and frontend CI (if they ran)
-        if: github.event_name != 'workflow_dispatch' || inputs.skip_ci_gate != true
+        if: github.event_name == 'workflow_run'
         env:
           GH_TOKEN: ${{ github.token }}
           DEPLOY_SHA: ${{ steps.resolve.outputs.deploy_sha }}
@@ -147,9 +158,11 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         with:
           host: ${{ secrets.REMOTE_HOST || secrets.MADSAN_DEPLOY_HOST }}
-          username: ${{ secrets.REMOTE_USER || secrets.MADSAN_DEPLOY_USER }}
+          # Oracle ARM prod VM rejects opc — must SSH as ubuntu (all 15 prior deploys failed in ~3s with opc).
+          username: ubuntu
           key: ${{ secrets.REMOTE_SSH_KEY || secrets.MADSAN_DEPLOY_SSH_KEY }}
           port: 22
+          command_timeout: 15m
           envs: DEPLOY_SHA,DEPLOY_REF,IMAGE_TAG,MADSAN_DEPLOY_PATH,LEGACY_DEPLOY_PATH,GITHUB_REPOSITORY,GITHUB_TOKEN
           script_stop: true
           script: |

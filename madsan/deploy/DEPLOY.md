@@ -97,10 +97,9 @@ MadSan deploy uses these **SSH and registry secrets** (repository Settings → S
 | `DOCKER_USERNAME` | Docker Hub login for `madsan-publish.yml` |
 | `DOCKER_PASSWORD` | Docker Hub token/password for publish |
 | `REMOTE_HOST` | VM hostname or IP |
-| `REMOTE_USER` | SSH user (e.g. `ubuntu`; must run `docker compose` or have passwordless sudo for legacy shutdown) |
-| `REMOTE_SSH_KEY` | Private key for SSH (PEM; no passphrase recommended for Actions) |
+| `REMOTE_SSH_KEY` | Private key for SSH user **ubuntu** (Oracle ARM VM rejects `opc`) |
 
-Optional aliases (only if `REMOTE_*` is not set): `MADSAN_DEPLOY_HOST`, `MADSAN_DEPLOY_USER`, `MADSAN_DEPLOY_SSH_KEY`.
+Optional aliases (only if `REMOTE_*` is not set): `MADSAN_DEPLOY_HOST`, `MADSAN_DEPLOY_SSH_KEY`.
 
 **Do not** add MadSan-specific GitHub secrets for API keys (`AISSTREAM_API_KEY`, `GROQ_API_KEY`, `EIA_API_KEY`, etc.). Those belong in **`madsan/deploy/.env` on the VM only** — the deploy workflow never reads them from GitHub.
 
