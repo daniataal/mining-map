@@ -25,7 +25,7 @@ import UserMenu from "@/components/auth/UserMenu";
 import { useAuth } from "@/contexts/AuthContext";
 import { authFetchOpts } from "@/lib/auth";
 import { canUse, effectiveEntitlements, FEATURE } from "@/lib/entitlements";
-import { API_BASE } from "@/lib/layers";
+import { apiBase } from "@/lib/layers";
 import { mergePipelineFocus, pipelineFocusFromSelection, type PipelineMapFocus } from "@/lib/energyApi";
 import EntityDossierPanel, { type MapSelection } from "./EntityDossierPanel";
 import IntelligenceMap, { type MapRuntimeStatus } from "./IntelligenceMap";
@@ -108,7 +108,7 @@ export default function TerminalShell() {
   }, []);
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/core/ticker`, authFetchOpts)
+    fetch(`${apiBase()}/api/core/ticker`, authFetchOpts)
       .then((r) => r.json())
       .then((d: { quotes?: TickerQuote[]; tier?: string; disclaimer?: string; observed_at?: string }) => {
         setQuotes(d.quotes ?? []);
@@ -121,7 +121,7 @@ export default function TerminalShell() {
 
   useEffect(() => {
     if (vertical !== "metals") return;
-    fetch(`${API_BASE}/api/metals/licenses/summary`, authFetchOpts)
+    fetch(`${apiBase()}/api/metals/licenses/summary`, authFetchOpts)
       .then((r) => r.json())
       .then(setMetalsSummary)
       .catch(() => {});

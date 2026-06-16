@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { API_BASE } from "@/lib/layers";
+import { apiBase } from "@/lib/layers";
 
 type DataProps = {
   mode: "data";
@@ -57,7 +57,7 @@ export default function FeedbackFlywheel(props: Props) {
           };
 
     try {
-      const res = await fetch(`${API_BASE}/api/feedback`, {
+      const res = await fetch(`${apiBase()}/api/feedback`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },

@@ -3,7 +3,7 @@
 /** Admin user management: list, create, role/active toggle, password reset, session revoke. */
 import { useCallback, useEffect, useState } from "react";
 import { authFetchOpts } from "@/lib/auth";
-import { API_BASE } from "@/lib/layers";
+import { apiBase } from "@/lib/layers";
 
 type AdminUser = {
   id: string;
@@ -38,7 +38,7 @@ export default function AdminUsersPanel() {
   const [busy, setBusy] = useState(false);
 
   const refresh = useCallback(async () => {
-    const res = await fetch(`${API_BASE}/api/admin/users`, authFetchOpts);
+    const res = await fetch(`${apiBase()}/api/admin/users`, authFetchOpts);
     if (res.status === 403) {
       setForbidden(true);
       return;
@@ -55,7 +55,7 @@ export default function AdminUsersPanel() {
   async function createUser() {
     setMsg("");
     setBusy(true);
-    const res = await fetch(`${API_BASE}/api/admin/users`, {
+    const res = await fetch(`${apiBase()}/api/admin/users`, {
       ...authFetchOpts,
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -75,7 +75,7 @@ export default function AdminUsersPanel() {
 
   async function patchUser(id: string, patch: Record<string, unknown>) {
     setMsg("");
-    const res = await fetch(`${API_BASE}/api/admin/users/${id}`, {
+    const res = await fetch(`${apiBase()}/api/admin/users/${id}`, {
       ...authFetchOpts,
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -92,7 +92,7 @@ export default function AdminUsersPanel() {
     const pw = prompt(`New password for ${u.email} (min 8 chars):`);
     if (!pw) return;
     setMsg("");
-    const res = await fetch(`${API_BASE}/api/admin/users/${u.id}/reset-password`, {
+    const res = await fetch(`${apiBase()}/api/admin/users/${u.id}/reset-password`, {
       ...authFetchOpts,
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -103,7 +103,7 @@ export default function AdminUsersPanel() {
 
   async function revokeSessions(u: AdminUser) {
     setMsg("");
-    const res = await fetch(`${API_BASE}/api/admin/users/${u.id}/revoke-sessions`, {
+    const res = await fetch(`${apiBase()}/api/admin/users/${u.id}/revoke-sessions`, {
       ...authFetchOpts,
       method: "POST",
     });

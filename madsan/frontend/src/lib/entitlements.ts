@@ -1,5 +1,5 @@
 import { authFetchOpts } from "@/lib/auth";
-import { API_BASE } from "@/lib/layers";
+import { apiBase, isLocalDevApi } from "@/lib/layers";
 
 export const FEATURE = {
   dealVerification: "deal_verification",
@@ -33,8 +33,7 @@ export function devGrantMapPremiumLayers(): boolean {
   const explicit = process.env.NEXT_PUBLIC_MADSAN_GRANT_MAP_PREMIUM_LAYERS;
   if (explicit === "true") return true;
   if (explicit === "false") return false;
-  const base = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8088").toLowerCase();
-  return base.includes("localhost") || base.includes("127.0.0.1");
+  return isLocalDevApi();
 }
 
 export function effectiveEntitlements(
@@ -49,7 +48,7 @@ export function effectiveEntitlements(
 
 export async function fetchMe(): Promise<MeResponse | null> {
   try {
-    const res = await fetch(`${API_BASE}/api/core/auth/me`, authFetchOpts);
+    const res = await fetch(`${apiBase()}/api/core/auth/me`, authFetchOpts);
     if (!res.ok) return null;
     return (await res.json()) as MeResponse;
   } catch {

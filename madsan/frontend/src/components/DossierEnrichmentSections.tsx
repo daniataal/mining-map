@@ -19,7 +19,7 @@ import {
   resolveAssetEnrichment,
   resolveVesselEnrichment,
 } from "@/lib/dossier";
-import { API_BASE } from "@/lib/layers";
+import { apiBase } from "@/lib/layers";
 import { cn } from "@/lib/utils";
 
 type EnrichmentDossier = CoreDossier & {
@@ -94,7 +94,7 @@ function EnrichmentHeader({
     setRefreshBusy(true);
     setRefreshMsg("");
     try {
-      const res = await fetch(`${API_BASE}${enrichmentRefreshUrl(entityType, entityId)}`, {
+      const res = await fetch(`${apiBase()}${enrichmentRefreshUrl(entityType, entityId)}`, {
         ...authFetchOpts,
         method: "POST",
       });

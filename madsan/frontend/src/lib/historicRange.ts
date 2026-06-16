@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { authFetchOpts } from "@/lib/auth";
-import { API_BASE } from "@/lib/layers";
+import { apiBase } from "@/lib/layers";
 
 export type HistoricPreset = "7d" | "30d" | "90d" | "1y" | "custom";
 
@@ -88,7 +88,7 @@ export function useHistoricAggregates({
       metric,
       bucket,
     });
-    return `${API_BASE}/api/core/aggregates/${entityType}/${encodeURIComponent(entityId)}?${q}`;
+    return `${apiBase()}/api/core/aggregates/${entityType}/${encodeURIComponent(entityId)}?${q}`;
   }, [entityType, entityId, range.from, range.to, metric, bucket]);
 
   useEffect(() => {

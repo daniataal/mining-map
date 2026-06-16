@@ -38,7 +38,7 @@ import {
   isPointInPersianGulf,
   LIMITED_AIS_COVERAGE_DETAIL,
   LIMITED_AIS_COVERAGE_LABEL,
-  API_BASE,
+  apiBase,
 } from "@/lib/layers";
 
 export type MapSelection = {
@@ -192,11 +192,11 @@ type Props = {
 };
 
 function gemLookupURL(segmentKey: string): string {
-  return `${API_BASE}/api/core/assets/lookup?legacy_table=gem_goit_pipelines&legacy_id=${encodeURIComponent(segmentKey)}`;
+  return `${apiBase()}/api/core/assets/lookup?legacy_table=gem_goit_pipelines&legacy_id=${encodeURIComponent(segmentKey)}`;
 }
 
 function osmPipelineLookupURL(legacyId: string): string {
-  return `${API_BASE}/api/core/assets/lookup?legacy_table=legacy_petroleum_osm_features&legacy_id=${encodeURIComponent(legacyId)}`;
+  return `${apiBase()}/api/core/assets/lookup?legacy_table=legacy_petroleum_osm_features&legacy_id=${encodeURIComponent(legacyId)}`;
 }
 
 async function loadDossierJSON(url: string): Promise<Dossier> {
@@ -517,7 +517,7 @@ export default function EntityDossierPanel({
         }
 
         if (selection!.id && UUID_RE.test(selection!.id)) {
-          const d = await loadDossierJSON(`${API_BASE}/api/core/entities/${entityType}/${selection!.id}`);
+          const d = await loadDossierJSON(`${apiBase()}/api/core/entities/${entityType}/${selection!.id}`);
           if (!cancelled) setDossier(d);
           return;
         }
@@ -550,7 +550,7 @@ export default function EntityDossierPanel({
         }
 
         if (mmsi && entityType === "vessel") {
-          const d = await loadDossierJSON(`${API_BASE}/api/energy/vessels/by-mmsi/${mmsi}`);
+          const d = await loadDossierJSON(`${apiBase()}/api/energy/vessels/by-mmsi/${mmsi}`);
           if (!cancelled) setDossier(d);
           return;
         }

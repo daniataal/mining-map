@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { authFetchOpts } from "@/lib/auth";
-import { API_BASE } from "@/lib/layers";
+import { apiBase } from "@/lib/layers";
 
 export type DDAssistResult = {
   deal_id?: string;
@@ -32,7 +32,7 @@ export default function DDCopilotPanel({ dealId, disabled }: Props) {
     if (!dealId) return;
     setLoading(true);
     setError("");
-    const res = await fetch(`${API_BASE}/api/deals/${dealId}/dd-assist`, {
+    const res = await fetch(`${apiBase()}/api/deals/${dealId}/dd-assist`, {
       ...authFetchOpts,
       method: "POST",
       headers: { "Content-Type": "application/json" },

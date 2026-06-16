@@ -6,7 +6,7 @@ import AuthGate from "@/components/auth/AuthGate";
 import { useAuth } from "@/contexts/AuthContext";
 import { authFetchOpts } from "@/lib/auth";
 import { canUse, FEATURE } from "@/lib/entitlements";
-import { API_BASE } from "@/lib/layers";
+import { apiBase } from "@/lib/layers";
 import { useState } from "react";
 
 const fetchOpts = authFetchOpts;
@@ -46,7 +46,7 @@ export default function PortalPage() {
 
     let res: Response;
     try {
-      res = await fetch(`${API_BASE}/api/portal/offers`, {
+      res = await fetch(`${apiBase()}/api/portal/offers`, {
         ...fetchOpts,
         method: "POST",
         headers: { "Content-Type": "application/json" },

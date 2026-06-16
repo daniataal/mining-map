@@ -1,5 +1,7 @@
 /** Cookie-session auth: always send cookies; never persist JWT in browser storage. */
-import { API_BASE } from "@/lib/layers";
+import { apiBase, isLocalDevApi } from "@/lib/layers";
+
+export { isLocalDevApi };
 import type { MeResponse } from "@/lib/entitlements";
 
 export const authFetchOpts: RequestInit = { credentials: "include" };
@@ -27,11 +29,6 @@ export function clearLegacyAuthTokens(): void {
   }
 }
 
-export function isLocalDevApi(): boolean {
-  const base = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8088").toLowerCase();
-  return base.includes("localhost") || base.includes("127.0.0.1");
-}
-
 /** Turn raw API error bodies into short user-facing messages. */
 export function parseAuthError(raw: string): string {
   const text = raw.trim();
@@ -45,7 +42,7 @@ export function parseAuthError(raw: string): string {
 
 export async function fetchSession(): Promise<MeResponse | null> {
   try {
-    const res = await fetch(`${API_BASE}/api/core/auth/me`, authFetchOpts);
+    const res = await fetch(`${apiBase()}/api/core/auth/me`, authFetchOpts);
     if (!res.ok) return null;
     return (await res.json()) as MeResponse;
   } catch {
@@ -54,7 +51,7 @@ export async function fetchSession(): Promise<MeResponse | null> {
 }
 
 export async function loginWithPassword(email: string, password: string): Promise<string | null> {
-  const res = await fetch(`${API_BASE}/api/core/auth/login`, {
+  const res = await fetch(`${apiBase()}/api/core/auth/login`, {
     ...authFetchOpts,
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -70,7 +67,7 @@ export async function registerAccount(opts: {
   displayName: string;
   tenantSlug?: string;
 }): Promise<string | null> {
-  const res = await fetch(`${API_BASE}/api/core/auth/register`, {
+  const res = await fetch(`${apiBase()}/api/core/auth/register`, {
     ...authFetchOpts,
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -87,7 +84,7 @@ export async function registerAccount(opts: {
 
 export async function logoutSession(): Promise<void> {
   try {
-    await fetch(`${API_BASE}/api/core/auth/logout`, { ...authFetchOpts, method: "POST" });
+    await fetch(`${apiBase()}/api/core/auth/logout`, { ...authFetchOpts, method: "POST" });
   } catch {
     // cookie clear is best-effort when API is down
   }

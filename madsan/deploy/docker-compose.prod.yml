@@ -161,7 +161,8 @@ services:
     stop_grace_period: 15s
     ports: !reset []
     environment:
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost}
+      # Baked at image build; leave unset for same-origin prod (Caddy). Dev: http://localhost:8088
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
     depends_on:
       madsan-api:
         condition: service_healthy

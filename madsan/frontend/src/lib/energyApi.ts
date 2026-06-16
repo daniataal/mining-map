@@ -1,6 +1,6 @@
 import type { FeatureCollection } from "geojson";
 import { authFetchOpts } from "@/lib/auth";
-import { API_BASE } from "@/lib/layers";
+import { apiBase } from "@/lib/layers";
 
 export type ShipvaultFleetVessel = {
   name?: string;
@@ -1068,14 +1068,14 @@ export function shapeDossierWorkspace(
 }
 
 export async function fetchShipvaultCompany(companyId: string): Promise<ShipvaultCompany | null> {
-  const res = await fetch(`${API_BASE}/api/energy/shipvault/companies/${encodeURIComponent(companyId)}`, authFetchOpts);
+  const res = await fetch(`${apiBase()}/api/energy/shipvault/companies/${encodeURIComponent(companyId)}`, authFetchOpts);
   if (!res.ok) return null;
   return res.json() as Promise<ShipvaultCompany>;
 }
 
 export async function fetchVesselPortCalls(mmsi: string, limit = 20): Promise<PortCallRecord[]> {
   const res = await fetch(
-    `${API_BASE}/api/energy/vessels/by-mmsi/${encodeURIComponent(mmsi)}/port-calls?limit=${limit}`,
+    `${apiBase()}/api/energy/vessels/by-mmsi/${encodeURIComponent(mmsi)}/port-calls?limit=${limit}`,
     authFetchOpts,
   );
   if (!res.ok) return [];
@@ -1085,7 +1085,7 @@ export async function fetchVesselPortCalls(mmsi: string, limit = 20): Promise<Po
 
 export async function fetchVesselTrack(mmsi: string, hours = 24): Promise<FeatureCollection> {
   const res = await fetch(
-    `${API_BASE}/api/energy/vessels/by-mmsi/${encodeURIComponent(mmsi)}/track?hours=${hours}`,
+    `${apiBase()}/api/energy/vessels/by-mmsi/${encodeURIComponent(mmsi)}/track?hours=${hours}`,
     authFetchOpts,
   );
   if (!res.ok) {
@@ -1096,7 +1096,7 @@ export async function fetchVesselTrack(mmsi: string, hours = 24): Promise<Featur
 
 export async function fetchSTSEvents(bbox?: string): Promise<FeatureCollection & { disclaimer?: string; tier?: string }> {
   const q = bbox ? `?bbox=${encodeURIComponent(bbox)}` : "";
-  const res = await fetch(`${API_BASE}/api/energy/sts/events${q}`, authFetchOpts);
+  const res = await fetch(`${apiBase()}/api/energy/sts/events${q}`, authFetchOpts);
   if (!res.ok) {
     return { type: "FeatureCollection", features: [] };
   }
@@ -1113,7 +1113,7 @@ export type STSSummary = {
 };
 
 export async function fetchSTSSummary(): Promise<STSSummary | null> {
-  const res = await fetch(`${API_BASE}/api/energy/sts/summary`, authFetchOpts);
+  const res = await fetch(`${apiBase()}/api/energy/sts/summary`, authFetchOpts);
   if (!res.ok) return null;
   return res.json() as Promise<STSSummary>;
 }
@@ -1124,7 +1124,7 @@ export async function fetchSTSPredictions(
 ): Promise<FeatureCollection & { disclaimer?: string; tier?: string }> {
   const params = new URLSearchParams({ horizon: String(horizon) });
   if (bbox) params.set("bbox", bbox);
-  const res = await fetch(`${API_BASE}/api/energy/sts/predictions?${params}`, authFetchOpts);
+  const res = await fetch(`${apiBase()}/api/energy/sts/predictions?${params}`, authFetchOpts);
   if (!res.ok) {
     return { type: "FeatureCollection", features: [] };
   }
@@ -1153,7 +1153,7 @@ export async function fetchNearestGemPipeline(
     lng: String(lng),
     max_m: String(maxM),
   });
-  const res = await fetch(`${API_BASE}/api/energy/pipelines/nearest-gem?${params}`, authFetchOpts);
+  const res = await fetch(`${apiBase()}/api/energy/pipelines/nearest-gem?${params}`, authFetchOpts);
   if (!res.ok) return { found: false };
   return (await res.json()) as NearestGemPipelineHit;
 }
@@ -1191,7 +1191,7 @@ export type PipelineConnectivity = {
 
 export async function fetchPipelineConnectivity(pipelineId: string): Promise<PipelineConnectivity | null> {
   const res = await fetch(
-    `${API_BASE}/api/energy/pipelines/${encodeURIComponent(pipelineId)}/connectivity`,
+    `${apiBase()}/api/energy/pipelines/${encodeURIComponent(pipelineId)}/connectivity`,
     authFetchOpts,
   );
   if (!res.ok) return null;
@@ -1304,7 +1304,7 @@ export async function fetchBunkerSuppliers(): Promise<{
   supplier_count?: number;
   disclaimer?: string;
 }> {
-  const res = await fetch(`${API_BASE}/api/energy/bunker/suppliers`, authFetchOpts);
+  const res = await fetch(`${apiBase()}/api/energy/bunker/suppliers`, authFetchOpts);
   if (!res.ok) return { hubs: [] };
   return res.json();
 }
@@ -1312,7 +1312,7 @@ export async function fetchBunkerSuppliers(): Promise<{
 export async function fetchStorageSites(bbox?: string): Promise<FeatureCollection & { disclaimer?: string; tier?: string }> {
   const params = new URLSearchParams({ limit: "1500" });
   if (bbox) params.set("bbox", bbox);
-  const res = await fetch(`${API_BASE}/api/energy/storage/sites?${params}`, authFetchOpts);
+  const res = await fetch(`${apiBase()}/api/energy/storage/sites?${params}`, authFetchOpts);
   if (!res.ok) {
     return { type: "FeatureCollection", features: [] };
   }
@@ -1333,7 +1333,7 @@ export type StorageSummary = {
 };
 
 export async function fetchStorageSummary(): Promise<StorageSummary | null> {
-  const res = await fetch(`${API_BASE}/api/energy/storage/summary`, authFetchOpts);
+  const res = await fetch(`${apiBase()}/api/energy/storage/summary`, authFetchOpts);
   if (!res.ok) return null;
   return res.json() as Promise<StorageSummary>;
 }
@@ -1341,7 +1341,7 @@ export async function fetchStorageSummary(): Promise<StorageSummary | null> {
 export async function fetchMCRCorridors(bbox?: string, limit = 300): Promise<FeatureCollection & { disclaimer?: string; tier?: string }> {
   const params = new URLSearchParams({ limit: String(limit) });
   if (bbox) params.set("bbox", bbox);
-  const res = await fetch(`${API_BASE}/api/energy/mcr/corridors?${params}`, authFetchOpts);
+  const res = await fetch(`${apiBase()}/api/energy/mcr/corridors?${params}`, authFetchOpts);
   if (!res.ok) {
     return { type: "FeatureCollection", features: [] };
   }
@@ -1354,7 +1354,7 @@ export async function fetchAssetGeometries(
 ): Promise<FeatureCollection & { count?: number; simplified?: boolean; message?: string }> {
   const params = new URLSearchParams({ limit: String(limit) });
   if (bbox) params.set("bbox", bbox);
-  const res = await fetch(`${API_BASE}/api/intel/asset-geometries?${params}`, authFetchOpts);
+  const res = await fetch(`${apiBase()}/api/intel/asset-geometries?${params}`, authFetchOpts);
   if (!res.ok) {
     return { type: "FeatureCollection", features: [] };
   }
@@ -1362,14 +1362,14 @@ export async function fetchAssetGeometries(
 }
 
 export async function fetchUnknownSupplierLeads(limit = 12): Promise<UnknownSupplierLead[]> {
-  const res = await fetch(`${API_BASE}/api/energy/leads/unknown-suppliers?limit=${limit}`, authFetchOpts);
+  const res = await fetch(`${apiBase()}/api/energy/leads/unknown-suppliers?limit=${limit}`, authFetchOpts);
   if (!res.ok) return [];
   const data = (await res.json()) as { leads?: UnknownSupplierLead[] };
   return data.leads ?? [];
 }
 
 export async function fetchMCRStatus(): Promise<MCRScaffoldStatus | null> {
-  const res = await fetch(`${API_BASE}/api/energy/mcr/scaffold/status`, authFetchOpts);
+  const res = await fetch(`${apiBase()}/api/energy/mcr/scaffold/status`, authFetchOpts);
   if (!res.ok) return null;
   return res.json() as Promise<MCRScaffoldStatus>;
 }
@@ -1388,7 +1388,7 @@ export async function fetchIntelOpportunities(params?: {
   if (params?.destination) q.set("destination", params.destination);
   if (params?.minScore != null) q.set("min_score", String(params.minScore));
   if (params?.role) q.set("role", params.role);
-  const res = await fetch(`${API_BASE}/api/intel/opportunities?${q}`, authFetchOpts);
+  const res = await fetch(`${apiBase()}/api/intel/opportunities?${q}`, authFetchOpts);
   if (!res.ok) return [];
   const data = (await res.json()) as { items?: IntelOpportunity[] };
   return data.items ?? [];
@@ -1402,14 +1402,14 @@ export async function fetchIntelCargoMovements(params?: {
   const q = new URLSearchParams({ limit: String(params?.limit ?? 12) });
   if (params?.commodity) q.set("commodity", params.commodity);
   if (params?.country) q.set("country", params.country);
-  const res = await fetch(`${API_BASE}/api/intel/cargo-movements?${q}`, authFetchOpts);
+  const res = await fetch(`${apiBase()}/api/intel/cargo-movements?${q}`, authFetchOpts);
   if (!res.ok) return [];
   const data = (await res.json()) as { items?: IntelCargoMovement[] };
   return data.items ?? [];
 }
 
 export async function fetchIntelSTSPredictions(limit = 12): Promise<IntelSTSPrediction[]> {
-  const res = await fetch(`${API_BASE}/api/intel/sts-predictions?limit=${limit}`, authFetchOpts);
+  const res = await fetch(`${apiBase()}/api/intel/sts-predictions?limit=${limit}`, authFetchOpts);
   if (!res.ok) return [];
   const data = (await res.json()) as { items?: IntelSTSPrediction[] };
   return data.items ?? [];
@@ -1425,7 +1425,7 @@ export async function fetchIntelImporters(params?: {
   if (params?.commodity) q.set("commodity", params.commodity);
   if (params?.origin) q.set("origin", params.origin);
   if (params?.company) q.set("company", params.company);
-  const res = await fetch(`${API_BASE}/api/intel/importers?${q}`, authFetchOpts);
+  const res = await fetch(`${apiBase()}/api/intel/importers?${q}`, authFetchOpts);
   if (!res.ok) return [];
   const data = (await res.json()) as { items?: IntelImporter[] };
   return data.items ?? [];
@@ -1449,7 +1449,7 @@ export async function fetchIntelInvestorPaths(params?: {
   if (params?.assetId) q.set("asset_id", params.assetId);
   if (params?.opportunityId) q.set("opportunity_id", params.opportunityId);
   if (params?.minScore != null) q.set("min_score", String(params.minScore));
-  const res = await fetch(`${API_BASE}/api/intel/investor-paths?${q}`, authFetchOpts);
+  const res = await fetch(`${apiBase()}/api/intel/investor-paths?${q}`, authFetchOpts);
   if (!res.ok) return [];
   const data = (await res.json()) as { items?: IntelInvestorPath[] };
   return data.items ?? [];
@@ -1460,7 +1460,7 @@ export async function fetchIntelCommercialProfile(
   id: string,
 ): Promise<IntelCommercialProfile | null> {
   const res = await fetch(
-    `${API_BASE}/api/intel/entities/${encodeURIComponent(entityType)}/${encodeURIComponent(id)}/commercial-profile`,
+    `${apiBase()}/api/intel/entities/${encodeURIComponent(entityType)}/${encodeURIComponent(id)}/commercial-profile`,
     authFetchOpts,
   );
   if (!res.ok) return null;
@@ -1476,7 +1476,7 @@ export async function fetchIntelArbitrage(params: {
   if (params.origin) q.set("origin", params.origin);
   if (params.destination) q.set("destination", params.destination);
   if (params.commodity) q.set("commodity", params.commodity);
-  const res = await fetch(`${API_BASE}/api/intel/arbitrage?${q}`, authFetchOpts);
+  const res = await fetch(`${apiBase()}/api/intel/arbitrage?${q}`, authFetchOpts);
   if (!res.ok) return null;
   return res.json() as Promise<IntelArbitrage>;
 }

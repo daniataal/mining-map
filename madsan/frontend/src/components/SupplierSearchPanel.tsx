@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { authFetchOpts } from "@/lib/auth";
 import { fetchBunkerSuppliers } from "@/lib/energyApi";
-import { API_BASE } from "@/lib/layers";
+import { apiBase } from "@/lib/layers";
 
 type Supplier = {
   id: string;
@@ -113,7 +113,7 @@ export default function SupplierSearchPanel({ canSearch = true, authed = true }:
     if (lat != null) params.set("near_lat", String(lat));
     if (lon != null) params.set("near_lon", String(lon));
     if (radius != null) params.set("radius_km", String(radius));
-    const res = await fetch(`${API_BASE}/api/energy/suppliers/search?${params}`, authFetchOpts);
+    const res = await fetch(`${apiBase()}/api/energy/suppliers/search?${params}`, authFetchOpts);
     if (res.status === 401 || res.status === 403) {
       setResults([]);
       setSelected(null);
@@ -143,7 +143,7 @@ export default function SupplierSearchPanel({ canSearch = true, authed = true }:
   }
 
   async function openSupplier(id: string) {
-    const res = await fetch(`${API_BASE}/api/energy/companies/${id}`, authFetchOpts);
+    const res = await fetch(`${apiBase()}/api/energy/companies/${id}`, authFetchOpts);
     setSelected(res.ok ? await res.json() : null);
   }
 

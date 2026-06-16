@@ -7,7 +7,7 @@ import AuthGate from "@/components/auth/AuthGate";
 import { useAuth } from "@/contexts/AuthContext";
 import { authFetchOpts } from "@/lib/auth";
 import { canUse, FEATURE } from "@/lib/entitlements";
-import { API_BASE } from "@/lib/layers";
+import { apiBase } from "@/lib/layers";
 
 type Insights = {
   entities?: { assets?: number; companies?: number; vessels?: number; vessels_ais_24h?: number };
@@ -71,16 +71,16 @@ export default function DataQualityPage() {
 
   const refresh = useCallback(() => {
     if (!authed || !canUseAdmin) return;
-    fetch(`${API_BASE}/api/admin/insights/summary`, fetchOpts)
+    fetch(`${apiBase()}/api/admin/insights/summary`, fetchOpts)
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => d && setInsights(d));
-    fetch(`${API_BASE}/api/admin/health`, fetchOpts)
+    fetch(`${apiBase()}/api/admin/health`, fetchOpts)
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => d && setPlatform(d));
-    fetch(`${API_BASE}/api/admin/health/runtime`, fetchOpts)
+    fetch(`${apiBase()}/api/admin/health/runtime`, fetchOpts)
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => d && setParityTables(d?.legacy_parity?.tables ?? []));
-    fetch(`${API_BASE}/api/admin/ingestion/jobs`, fetchOpts)
+    fetch(`${apiBase()}/api/admin/ingestion/jobs`, fetchOpts)
       .then((r) => (r.ok ? r.json() : []))
       .then(setJobs);
   }, [authed, canUseAdmin]);

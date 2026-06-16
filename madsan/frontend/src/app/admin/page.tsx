@@ -8,7 +8,7 @@ import AuthGate from "@/components/auth/AuthGate";
 import { useAuth } from "@/contexts/AuthContext";
 import { authFetchOpts } from "@/lib/auth";
 import { canUse, FEATURE } from "@/lib/entitlements";
-import { API_BASE } from "@/lib/layers";
+import { apiBase } from "@/lib/layers";
 
 type Insights = {
   entities?: { assets?: number; companies?: number; vessels?: number; vessels_ais_24h?: number };
@@ -190,7 +190,7 @@ export default function AdminPage() {
   const refreshAdmin = useCallback(() => {
     if (!authed || !canUseAdmin) return;
     setEntitlementError("");
-    fetch(`${API_BASE}/api/admin/insights/summary`, fetchOpts)
+    fetch(`${apiBase()}/api/admin/insights/summary`, fetchOpts)
       .then((r) => {
         if (r.status === 401) {
           void refreshSession();
@@ -204,27 +204,27 @@ export default function AdminPage() {
       })
       .then((d) => d && setInsights(d))
       .catch(() => {});
-    fetch(`${API_BASE}/api/admin/ingestion/jobs`, fetchOpts)
+    fetch(`${apiBase()}/api/admin/ingestion/jobs`, fetchOpts)
       .then((r) => (r.ok ? r.json() : []))
       .then(setJobs)
       .catch(() => {});
-    fetch(`${API_BASE}/api/admin/sources`, fetchOpts)
+    fetch(`${apiBase()}/api/admin/sources`, fetchOpts)
       .then((r) => (r.ok ? r.json() : []))
       .then(setSources)
       .catch(() => {});
-    fetch(`${API_BASE}/api/admin/review-queue`, fetchOpts)
+    fetch(`${apiBase()}/api/admin/review-queue`, fetchOpts)
       .then((r) => (r.ok ? r.json() : []))
       .then(setQueue)
       .catch(() => {});
-    fetch(`${API_BASE}/api/admin/dedup/companies?limit=15`, fetchOpts)
+    fetch(`${apiBase()}/api/admin/dedup/companies?limit=15`, fetchOpts)
       .then((r) => (r.ok ? r.json() : { clusters: [] }))
       .then((d) => setDupClusters(d.clusters ?? []))
       .catch(() => {});
-    fetch(`${API_BASE}/api/admin/health`, fetchOpts)
+    fetch(`${apiBase()}/api/admin/health`, fetchOpts)
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => d && setPlatform(d))
       .catch(() => {});
-    fetch(`${API_BASE}/api/admin/health/runtime`, fetchOpts)
+    fetch(`${apiBase()}/api/admin/health/runtime`, fetchOpts)
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => d && setRuntime(d))
       .catch(() => {});
@@ -240,7 +240,7 @@ export default function AdminPage() {
   async function enqueueClusterMergeReview(normalizedName: string) {
     setDedupMsg("");
     const res = await fetch(
-      `${API_BASE}/api/admin/dedup/clusters/${encodeURIComponent(normalizedName)}/enqueue-review`,
+      `${apiBase()}/api/admin/dedup/clusters/${encodeURIComponent(normalizedName)}/enqueue-review`,
       { ...fetchOpts, method: "POST" }
     );
     const data = await res.json().catch(() => ({}));
@@ -258,7 +258,7 @@ export default function AdminPage() {
 
   async function scanDuplicates() {
     setDedupMsg("");
-    const res = await fetch(`${API_BASE}/api/admin/dedup/companies/scan?limit=100`, { ...fetchOpts, method: "POST" });
+    const res = await fetch(`${apiBase()}/api/admin/dedup/companies/scan?limit=100`, { ...fetchOpts, method: "POST" });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       setDedupMsg(typeof data === "string" ? data : data?.error ?? JSON.stringify(data));
@@ -277,7 +277,7 @@ export default function AdminPage() {
 
   async function exportPairsCSV() {
     setDedupMsg("");
-    const res = await fetch(`${API_BASE}/api/admin/dedup/companies/pairs.csv?limit=200`, fetchOpts);
+    const res = await fetch(`${apiBase()}/api/admin/dedup/companies/pairs.csv?limit=200`, fetchOpts);
     if (!res.ok) {
       const errText = await res.text().catch(() => "");
       setDedupMsg(errText || `CSV export failed (${res.status})`);
@@ -308,7 +308,7 @@ export default function AdminPage() {
 
   async function resolveQueueItem(queueId: string, action: "merge" | "dismiss", canonicalCompanyId?: string) {
     setMsg("");
-    const res = await fetch(`${API_BASE}/api/admin/review-queue/${queueId}/resolve`, {
+    const res = await fetch(`${apiBase()}/api/admin/review-queue/${queueId}/resolve`, {
       ...fetchOpts,
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -330,7 +330,7 @@ export default function AdminPage() {
 
   async function enqueue(jobType: string, sourceSlug: string, payload?: Record<string, unknown>) {
     setMsg("");
-    const res = await fetch(`${API_BASE}/api/admin/ingestion/enqueue`, {
+    const res = await fetch(`${apiBase()}/api/admin/ingestion/enqueue`, {
       ...fetchOpts,
       method: "POST",
       headers: { "Content-Type": "application/json" },

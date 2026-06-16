@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { API_BASE } from "@/lib/layers";
+import { apiBase } from "@/lib/layers";
 import {
   LEGAL_CONTACT_EMAIL,
   fetchOpts,
@@ -39,7 +39,7 @@ export default function LegalDisputePage() {
 
     let res: Response;
     try {
-      res = await fetch(`${API_BASE}/api/legal/dispute`, {
+      res = await fetch(`${apiBase()}/api/legal/dispute`, {
         ...fetchOpts,
         method: "POST",
         headers: { "Content-Type": "application/json" },

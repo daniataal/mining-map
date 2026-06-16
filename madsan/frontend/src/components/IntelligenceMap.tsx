@@ -10,14 +10,16 @@ import { FEATURE } from "@/lib/entitlements";
 import { fetchAssetGeometries, fetchMCRCorridors, fetchSTSEvents, fetchSTSPredictions, fetchSTSSummary, fetchStorageSites, fetchVesselTrack, type STSSummary } from "@/lib/energyApi";
 import { useTheme } from "@/contexts/ThemeContext";
 import {
-  API_BASE,
+  apiBase,
   defaultLayerState,
   isLayerGroupOn,
+  isOwnTileUrl,
   layerGroupsForVertical,
   layersForVertical,
   MAP_COLORS,
   mapStyleForTheme,
   mapSourceKey,
+  wsApiBase,
   metalsMapLayersActive,
   type LayerDef,
   type LayerGroupDef,
@@ -1081,7 +1083,7 @@ export default function IntelligenceMap({
       container: container.current,
       transformRequest: (url, resourceType) => {
         // Only send auth cookies to our own tile API — never to the public basemap host.
-        if (resourceType === "Tile" && url.startsWith(API_BASE)) {
+        if (resourceType === "Tile" && isOwnTileUrl(url)) {
           return { url, credentials: "include" };
         }
         return { url };
@@ -1114,7 +1116,7 @@ export default function IntelligenceMap({
           if (!sourcesAdded.has(src)) {
             map.addSource(src, {
               type: "vector",
-              tiles: [`${API_BASE}/tiles/${layer.tileLayer}/{z}/{x}/{y}.mvt`],
+              tiles: [`${apiBase()}/tiles/${layer.tileLayer}/{z}/{x}/{y}.mvt`],
               minzoom: layer.tileLayer === "pipelines" ? 4 : 0,
               maxzoom: 14,
               promoteId: mvtPromoteId(layer.tileLayer!),
@@ -1663,7 +1665,7 @@ export default function IntelligenceMap({
           },
         });
 
-        const wsUrl = `${API_BASE.replace("http", "ws")}/api/core/ws?format=msgpack`;
+        const wsUrl = `${wsApiBase()}/api/core/ws?format=msgpack`;
         // Auto-reconnect with capped backoff so an API restart doesn't silently
         // kill the live overlay for already-open tabs.
         let wsRetryMs = 2000;

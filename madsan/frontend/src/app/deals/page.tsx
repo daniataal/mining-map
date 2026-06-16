@@ -12,7 +12,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { authFetchOpts } from "@/lib/auth";
 import { canUse, FEATURE } from "@/lib/entitlements";
 import { parseDealPackSearchParams } from "@/lib/dealPackNav";
-import { API_BASE } from "@/lib/layers";
+import { apiBase } from "@/lib/layers";
 
 const fetchOpts = authFetchOpts;
 
@@ -233,7 +233,7 @@ export default function DealsPage() {
 
   async function refreshChanges(dealId: string) {
     setChangesError("");
-    const res = await fetch(`${API_BASE}/api/deals/${dealId}/changes`, fetchOpts);
+    const res = await fetch(`${apiBase()}/api/deals/${dealId}/changes`, fetchOpts);
     if (res.status === 401) {
       await refresh();
       return;
@@ -253,7 +253,7 @@ export default function DealsPage() {
     if (!result?.deal_id) return;
     setWatchBusy(true);
     setChangesError("");
-    const res = await fetch(`${API_BASE}/api/deals/${result.deal_id}/watch`, {
+    const res = await fetch(`${apiBase()}/api/deals/${result.deal_id}/watch`, {
       ...fetchOpts,
       method: watch ? "POST" : "DELETE",
     });
@@ -274,7 +274,7 @@ export default function DealsPage() {
     setChangesError("");
     const fd = new FormData(e.currentTarget);
     const body = Object.fromEntries(fd.entries());
-    const res = await fetch(`${API_BASE}/api/deals/verify`, {
+    const res = await fetch(`${apiBase()}/api/deals/verify`, {
       ...fetchOpts,
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -312,8 +312,8 @@ export default function DealsPage() {
     setResult(data);
     if (data.deal_id) {
       const [packRes, changesRes] = await Promise.all([
-        fetch(`${API_BASE}/api/deals/${data.deal_id}/pack?format=json`, fetchOpts),
-        fetch(`${API_BASE}/api/deals/${data.deal_id}/changes`, fetchOpts),
+        fetch(`${apiBase()}/api/deals/${data.deal_id}/pack?format=json`, fetchOpts),
+        fetch(`${apiBase()}/api/deals/${data.deal_id}/changes`, fetchOpts),
       ]);
       if (packRes.status === 401 || changesRes.status === 401) {
         await refresh();
@@ -340,7 +340,7 @@ export default function DealsPage() {
   async function downloadPack(fmt: "json" | "markdown" | "html") {
     if (!result?.deal_id) return;
     setPackDownloadMsg("");
-    const res = await fetch(`${API_BASE}/api/deals/${result.deal_id}/pack?format=${fmt}`, fetchOpts);
+    const res = await fetch(`${apiBase()}/api/deals/${result.deal_id}/pack?format=${fmt}`, fetchOpts);
     if (res.status === 401) {
       await refresh();
       setPackDownloadMsg("Session expired — sign in again.");

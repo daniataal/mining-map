@@ -288,7 +288,57 @@ export function mapSourceKey(layer: LayerDef): string {
   return layer.tileSourceKey ?? `src-${layer.id}`;
 }
 
-export const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8088";
+function bakedApiBase(): string {
+  return process.env.NEXT_PUBLIC_API_URL ?? "";
+}
+
+/**
+ * Browser API origin. Unset NEXT_PUBLIC → same-origin (/api, /tiles) behind Caddy.
+ * When the image was baked with localhost but the page is served elsewhere, use same-origin.
+ */
+export function apiBase(): string {
+  if (typeof window === "undefined") return bakedApiBase();
+  const baked = bakedApiBase();
+  const onLocal =
+    window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+  if (baked && (baked.includes("localhost") || baked.includes("127.0.0.1")) && !onLocal) {
+    return "";
+  }
+  return baked;
+}
+
+export function isLocalDevApi(): boolean {
+  if (typeof window !== "undefined") {
+    const h = window.location.hostname;
+    if (h === "localhost" || h === "127.0.0.1") return true;
+  }
+  const base = bakedApiBase().toLowerCase();
+  return !!base && (base.includes("localhost") || base.includes("127.0.0.1"));
+}
+
+export function wsApiBase(): string {
+  const base = apiBase();
+  if (base) return base.replace(/^http/, "ws");
+  if (typeof window !== "undefined") {
+    const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+    return `${proto}//${window.location.host}`;
+  }
+  return "ws://localhost:8088";
+}
+
+/** Auth cookies only for our MVT host — never OpenFreeMap basemap tiles. */
+export function isOwnTileUrl(url: string): boolean {
+  const base = apiBase();
+  if (base) return url.startsWith(base);
+  try {
+    return new URL(url, window.location.origin).pathname.startsWith("/tiles/");
+  } catch {
+    return url.includes("/tiles/");
+  }
+}
+
+/** @deprecated use apiBase() — static bake only; wrong on prod if image used localhost. */
+export const API_BASE = bakedApiBase();
 
 /** Persian Gulf / Hormuz / Gulf of Oman — sparse open AIS provider coverage. */
 export const PERSIAN_GULF_AIS_BBOX = {
