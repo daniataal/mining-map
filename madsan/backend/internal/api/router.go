@@ -177,6 +177,8 @@ func (s *Server) Router() http.Handler {
 
 	r.Route("/api/intel", func(api chi.Router) {
 		api.Get("/opportunities", s.listIntelOpportunities)
+		api.Get("/opportunities/{id}/dossier", s.getIntelOpportunityDossier)
+		api.Get("/sts-open-vessels", s.listIntelSTSOpenVessels)
 		api.Get("/cargo-movements", s.listIntelCargoMovements)
 		api.Get("/asset-geometries", s.listIntelAssetGeometries)
 		api.Get("/arbitrage", s.compareIntelArbitrage)

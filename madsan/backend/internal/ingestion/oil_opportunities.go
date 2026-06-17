@@ -305,6 +305,9 @@ pairs AS (
 		) AS shared_investor_path,
 		s.supplier_components,
 		b.buyer_components,
+		COALESCE(eia.importer_rows, 0) AS eia_importer_rows,
+		COALESCE(eia.total_quantity_kbbl, 0) AS eia_total_quantity_kbbl,
+		COALESCE(eia.evidence, '{}'::jsonb) AS buyer_eia_evidence,
 		(
 			s.supplier_availability_score * 0.34
 			+ b.buyer_pressure_score * 0.34
@@ -334,6 +337,7 @@ pairs AS (
 				WHEN s.supplier_has_investor_exposure OR b.buyer_has_investor_exposure THEN 2
 				ELSE 0
 			  END
+			+ CASE WHEN COALESCE(eia.importer_rows, 0) > 0 THEN LEAST(12, 4 + eia.importer_rows * 2) ELSE 0 END
 		) AS score
 	FROM supplier_assets s
 	JOIN buyer_assets b
@@ -358,6 +362,26 @@ pairs AS (
 			observed_at DESC
 		LIMIT 1
 	) px ON true
+	LEFT JOIN LATERAL (
+		SELECT
+			COUNT(DISTINCT t.participant_name)::int AS importer_rows,
+			COALESCE(SUM(t.quantity), 0)::double precision AS total_quantity_kbbl,
+			jsonb_build_object(
+				'matched', COUNT(*) > 0,
+				'importer_rows', COUNT(DISTINCT t.participant_name),
+				'total_quantity_kbbl', COALESCE(SUM(t.quantity), 0),
+				'latest_month', MAX(t.month)::text,
+				'source', 'eia_company_imports',
+				'evidence_label', 'reported',
+				'partner_country_code', s.supplier_country,
+				'reporter_country_code', 'US'
+			) AS evidence
+		FROM trade_flow_facts t
+		WHERE t.source_key = 'eia_company_imports'
+		  AND t.flow_code = 'IMPORT'
+		  AND t.partner_country_code ILIKE s.supplier_country
+		  AND b.buyer_country ILIKE 'US'
+	) eia ON true
 )
 INSERT INTO opportunity_candidates (
 	opportunity_type,
@@ -389,7 +413,8 @@ INSERT INTO opportunity_candidates (
 	status,
 	generated_at,
 	expires_at,
-	metadata
+	metadata,
+	buyer_eia_evidence
 )
 SELECT
 	'supplier_buyer_lane',
@@ -410,7 +435,7 @@ SELECT
 		+ CASE WHEN has_gem_reserves THEN 4 ELSE 0 END
 		+ CASE WHEN has_gem_ownership THEN 5 ELSE 0 END
 	)::numeric, 2),
-	ROUND(buyer_pressure_score::numeric, 2),
+	ROUND(LEAST(100, buyer_pressure_score + CASE WHEN eia_importer_rows > 0 THEN LEAST(18, 6 + eia_importer_rows * 2) ELSE 0 END)::numeric, 2),
 	ROUND(((supplier_availability_score + buyer_pressure_score) / 2)::numeric, 2),
 	LEAST(100,
 		45
@@ -488,6 +513,7 @@ SELECT
 			'mapped_geometry', supplier_has_geometry
 		),
 		jsonb_build_object('label', 'reported', 'source', 'assets', 'role', 'buyer_asset', 'asset_id', buyer_asset_id, 'asset_name', buyer_asset_name, 'asset_type', buyer_asset_type, 'mapped_geometry', buyer_has_geometry),
+		jsonb_build_object('label', 'reported', 'source', 'eia_company_imports', 'matched', eia_importer_rows > 0, 'importer_rows', eia_importer_rows, 'total_quantity_kbbl', eia_total_quantity_kbbl),
 		jsonb_build_object('label', 'inferred', 'source', 'private_equity_exposures', 'role', 'investor_control_path', 'supplier_exposure', supplier_has_investor_exposure, 'buyer_exposure', buyer_has_investor_exposure, 'shared_investor_path', shared_investor_path)
 	),
 	ARRAY[
@@ -499,7 +525,8 @@ SELECT
 	'active',
 	now(),
 	now() + interval '45 days',
-	jsonb_build_object('generator', 'oil_opportunity_v1', 'market_month', to_char($1::date, 'YYYY-MM'))
+	jsonb_build_object('generator', 'oil_opportunity_v1', 'market_month', to_char($1::date, 'YYYY-MM')),
+	buyer_eia_evidence
 FROM pairs
 ORDER BY score DESC
 LIMIT $5

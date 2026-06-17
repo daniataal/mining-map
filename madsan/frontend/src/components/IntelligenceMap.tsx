@@ -169,6 +169,12 @@ function dossierHref(selection: MapSelection): string | null {
   return null;
 }
 
+function laneHref(selection: MapSelection): string | null {
+  const opportunityId = strProp(selection.opportunity_id);
+  if (!opportunityId) return null;
+  return `/intel/lane/${encodeURIComponent(opportunityId)}`;
+}
+
 function selectionFromMapHit(
   props: MapSelection,
   layerId: string,
@@ -243,6 +249,13 @@ function buildQuickPopupNode(selection: MapSelection, onInspect: () => void): HT
   title.className = "map-click-title";
   title.textContent = selection.name || selection.event_title || selection.mmsi || "Selected feature";
 
+  const thesis = strProp(selection.thesis_preview);
+  const thesisNode = thesis ? document.createElement("p") : null;
+  if (thesisNode) {
+    thesisNode.className = "map-click-thesis";
+    thesisNode.textContent = thesis ?? "";
+  }
+
   const rows = document.createElement("div");
   rows.className = "map-click-rows";
   [
@@ -273,7 +286,19 @@ function buildQuickPopupNode(selection: MapSelection, onInspect: () => void): HT
     actions.appendChild(open);
   }
 
+  const lane = laneHref(selection);
+  if (lane) {
+    const openLane = document.createElement("button");
+    openLane.type = "button";
+    openLane.textContent = "Open lane";
+    openLane.addEventListener("click", () => {
+      window.location.href = lane;
+    });
+    actions.appendChild(openLane);
+  }
+
   root.append(top, title);
+  if (thesisNode) root.appendChild(thesisNode);
   if (rows.childElementCount > 0) root.appendChild(rows);
   root.appendChild(actions);
   return root;
@@ -1055,6 +1080,8 @@ function interactiveLayerIds(vertical: "energy" | "metals"): string[] {
       "sts-predictions",
       "mcr-corridors",
       "storage-sites",
+      "rel-lines",
+      "rel-points",
     );
   }
   return ids;
@@ -1304,7 +1331,9 @@ export default function IntelligenceMap({
         const gemPipelineHit = pipelineHits.find((f) =>
           String((f.properties as { osm_id?: string })?.osm_id ?? "").startsWith("gem:"),
         );
+        const relHit = feats.find((f) => f.layer.id === "rel-lines" || f.layer.id === "rel-points");
         const hit =
+          relHit ??
           gemPipelineHit ??
           feats.find(
             (f) =>
@@ -1323,7 +1352,9 @@ export default function IntelligenceMap({
           return;
         }
         const props = hit.properties as MapSelection;
-        const layerId = isPipelineLayer(hit.layer.id)
+        const layerId = hit.layer.id === "rel-lines" || hit.layer.id === "rel-points"
+          ? hit.layer.id
+          : isPipelineLayer(hit.layer.id)
           ? "pipelines"
           : isGemAssetGeometryLayer(hit.layer.id)
             ? "gem-asset-geometries"
@@ -1349,6 +1380,15 @@ export default function IntelligenceMap({
           popup.setLngLat(e.lngLat).setDOMContent(node).addTo(map);
           clickPopupRef.current = popup;
         };
+        if (layerId === "rel-lines" || layerId === "rel-points") {
+          showQuickPopup({
+            ...props,
+            name: strProp(props.name) || "Opportunity chain",
+            _layer: layerId,
+            _entityType: "lane",
+          });
+          return;
+        }
         if (layerId === "sts-events" || layerId === "sts-predictions") {
           showQuickPopup(stsSelectionFromProps(props as Record<string, unknown>, layerId));
           return;

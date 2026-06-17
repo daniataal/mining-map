@@ -93,6 +93,18 @@ func (s *Service) ProcessJob(ctx context.Context, jobID uuid.UUID, dryRun bool) 
 	if jobType == opportunityChainSegmentsJobType {
 		return s.processOpportunityChainSegments(ctx, jobID, payload)
 	}
+	if jobType == brokerAlphaSnapshotsJobType {
+		return s.processBrokerAlphaSnapshots(ctx, jobID, payload)
+	}
+	if jobType == stsOpenVesselLeadsJobType {
+		return s.processSTSOpenVesselLeads(ctx, jobID, payload)
+	}
+	if jobType == cargoVoyageLinkerJobType {
+		return s.processCargoVoyageLinker(ctx, jobID, payload)
+	}
+	if jobType == landedMarginSnapshotsJobType {
+		return s.processLandedMarginSnapshots(ctx, jobID, payload)
+	}
 	if jobType == cargoEstimatesBackfillJobType {
 		return s.processCargoEstimatesBackfill(ctx, jobID, payload)
 	}
@@ -143,6 +155,18 @@ func (s *Service) ProcessJob(ctx context.Context, jobID uuid.UUID, dryRun bool) 
 	}
 	if jobType == voyageRebuildJobType {
 		return s.processVoyageRebuild(ctx, jobID)
+	}
+	if jobType == brokerAlphaSnapshotsJobType {
+		return s.processBrokerAlphaSnapshots(ctx, jobID, payload)
+	}
+	if jobType == stsOpenVesselLeadsJobType {
+		return s.processSTSOpenVesselLeads(ctx, jobID, payload)
+	}
+	if jobType == cargoVoyageLinkerJobType {
+		return s.processCargoVoyageLinker(ctx, jobID, payload)
+	}
+	if jobType == landedMarginSnapshotsJobType {
+		return s.processLandedMarginSnapshots(ctx, jobID, payload)
 	}
 	if isSourceImportJob(jobType) {
 		return s.processSourceImport(ctx, jobID, jobType, payload)

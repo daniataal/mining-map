@@ -96,6 +96,8 @@ export type MapSelection = {
   osm_id?: string;
   click_lat?: number;
   click_lng?: number;
+  opportunity_id?: string;
+  thesis_preview?: string;
 };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

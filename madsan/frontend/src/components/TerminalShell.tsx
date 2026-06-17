@@ -88,7 +88,7 @@ function tierBadgeVariant(tier: string): "verified" | "partial" {
 
 export default function TerminalShell() {
   const [vertical, setVertical] = useState<Vertical>("energy");
-  const [panel, setPanel] = useState<Panel>("intel");
+  const [panel, setPanel] = useState<Panel>("opportunities");
   const [selected, setSelected] = useState<MapSelection | null>(null);
   const [mapFocus, setMapFocus] = useState<{ lat: number; lng: number } | null>(null);
   const [relationshipLines, setRelationshipLines] = useState<FeatureCollection>({ type: "FeatureCollection", features: [] });
@@ -222,7 +222,7 @@ export default function TerminalShell() {
       />
       <div className="shell">
         <nav className="rail">
-          <button className={vertical === "energy" ? "active" : ""} title="Energy" onClick={() => { setVertical("energy"); setPanel("intel"); }}>
+          <button className={vertical === "energy" ? "active" : ""} title="Energy" onClick={() => { setVertical("energy"); setPanel("opportunities"); }}>
             <Zap size={18} />
           </button>
           <button className={vertical === "metals" ? "active" : ""} title="Metals" onClick={() => { setVertical("metals"); setPanel("intel"); }}>
@@ -270,7 +270,7 @@ export default function TerminalShell() {
               {panel === "suppliers"
                 ? "Supplier discovery"
                 : panel === "opportunities"
-                  ? "Opportunity originator"
+                  ? "Broker home"
                 : panel === "live"
                   ? "Live intel"
                   : panel === "watch"
@@ -305,6 +305,11 @@ export default function TerminalShell() {
           {panel === "intel" && !selected && vertical === "metals" && (
             <div className="panel-onboarding-hint">
               Toggle <strong>Mining licenses</strong> or <strong>Smelters</strong> on the map — cadastre coverage is partial.
+            </div>
+          )}
+          {panel === "opportunities" && vertical === "energy" && (
+            <div className="panel-onboarding-hint">
+              Pick an <strong>intent</strong>, scan thesis cards, then open a <strong>lane dossier</strong> in one tap.
             </div>
           )}
           {panel === "intel" && !selected && vertical === "energy" && (

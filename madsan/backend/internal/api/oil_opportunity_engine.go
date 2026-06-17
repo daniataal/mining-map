@@ -409,27 +409,40 @@ func (s *Server) compareIntelArbitrage(w http.ResponseWriter, r *http.Request) {
 	commodity := strings.TrimSpace(r.URL.Query().Get("commodity"))
 	origin := strings.TrimSpace(r.URL.Query().Get("origin"))
 	destination := strings.TrimSpace(r.URL.Query().Get("destination"))
+	opportunityID := strings.TrimSpace(r.URL.Query().Get("opportunity_id"))
 	benchmarks := s.latestBenchmarks(r, commodity)
 	if len(benchmarks) == 0 {
 		benchmarks = s.latestLegacySpotPrices(r, commodity)
 	}
+	landedMargin := map[string]any{"status": "indicative_context_only"}
+	if opportunityID != "" {
+		if snap := s.loadLandedMarginSnapshot(r, opportunityID); stringFromAny(snap["status"]) != "pending" {
+			landedMargin = snap
+		}
+	} else {
+		var id string
+		_ = s.pool.QueryRow(r.Context(), `
+			SELECT opportunity_id::text FROM landed_margin_snapshots
+			WHERE lower(COALESCE(origin_country, '')) = lower($1)
+			  AND lower(COALESCE(destination_country, '')) = lower($2)
+			  AND ($3 = '' OR commodity ILIKE '%' || $3 || '%')
+			ORDER BY generated_at DESC LIMIT 1
+		`, origin, destination, commodity).Scan(&id)
+		if id != "" {
+			landedMargin = s.loadLandedMarginSnapshot(r, id)
+		}
+	}
 	writeJSON(w, map[string]any{
-		"origin":      origin,
-		"destination": destination,
-		"commodity":   commodity,
-		"benchmarks":  benchmarks,
-		"landed_margin": map[string]any{
-			"status": "indicative_context_only",
-			"components": map[string]any{
-				"source_price":       firstBenchmark(benchmarks),
-				"destination_price":  nil,
-				"freight_estimate":   map[string]string{"status": "v2_refinement", "method": "distance, vessel class, bunker proxy, port dwell"},
-				"quality_adjustment": map[string]string{"status": "v2_refinement", "method": "crude assay / sulfur / API gravity bands"},
-			},
-		},
+		"origin":             origin,
+		"destination":        destination,
+		"commodity":          commodity,
+		"benchmarks":         benchmarks,
+		"landed_margin":      landedMargin,
+		"freight_curve":      s.loadFreightCurve(r, origin, destination, commodity),
+		"quality_adjustment": s.loadQualityAdjustment(r, commodity),
 		"limitations": []string{
-			"V1 returns benchmark spread context where open prices exist.",
-			"Full freight, quality, refining penalty, and landed-cost optimization are V2.",
+			"Margin bands use open benchmark, freight proxy, and quality adjustment snapshots.",
+			"Values are indicative scenario context — not confirmed deal prices.",
 		},
 	})
 }

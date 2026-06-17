@@ -1480,3 +1480,352 @@ export async function fetchIntelArbitrage(params: {
   if (!res.ok) return null;
   return res.json() as Promise<IntelArbitrage>;
 }
+
+export type IntelSTSOpenVessel = {
+  id: string;
+  vessel_name?: string;
+  imo?: string;
+  mmsi?: string;
+  zone_name?: string;
+  destination_hint?: string;
+  product_hint?: string;
+  draft_m?: number;
+  owner_name?: string;
+  operator_name?: string;
+  loiter_hours?: number;
+  evidence_label?: string;
+  contacts?: Array<Record<string, unknown>>;
+  limitations?: string[];
+};
+
+export type LaneDossierSegmentKey = "thesis" | "chain" | "act" | "numbers";
+
+export type LaneDossierRaw = {
+  opportunity?: IntelOpportunity;
+  investor_path?: IntelInvestorPath;
+  investor_paths?: IntelInvestorPath[];
+  commercial_chain_bundle?: Record<string, unknown>;
+  cargo_movements?: IntelCargoMovement[];
+  sts_predictions?: IntelSTSPrediction[];
+  importers?: IntelImporter[];
+  market_pressure?: Array<Record<string, unknown>>;
+  benchmarks?: Array<Record<string, unknown>>;
+  arbitrage?: IntelArbitrage | null;
+  contacts?: Array<Record<string, unknown>>;
+  outreach_pack?: Record<string, unknown>;
+  evidence_chain?: Array<Record<string, unknown>>;
+  thesis_text?: string;
+  broker_alpha?: Record<string, unknown>;
+  limitations?: string[];
+  synthesis_status?: "complete" | "partial" | "pending";
+  gaps?: string[];
+};
+
+export type LaneDossierView = {
+  id: string;
+  thesis: string;
+  evidenceGrade: string;
+  commodity?: string;
+  corridor?: string;
+  score?: number;
+  synthesisStatus: "complete" | "partial" | "pending";
+  segments: Record<
+    LaneDossierSegmentKey,
+    {
+      count: number;
+      items: DossierSectionItem[];
+      gaps: DossierGap[];
+    }
+  >;
+  limitations: string[];
+};
+
+function laneEvidenceAssetName(opp: IntelOpportunity | undefined, role: "supplier_asset" | "buyer_asset"): string {
+  const hit = opp?.evidence?.find((item) => dossierText(item.role) === role);
+  return dossierText(hit?.asset_name);
+}
+
+function laneThesisFromOpportunity(opp: IntelOpportunity, path?: IntelInvestorPath | null): string {
+  if (path?.commercial_thesis) return path.commercial_thesis;
+  const supplier = laneEvidenceAssetName(opp, "supplier_asset");
+  const buyer = laneEvidenceAssetName(opp, "buyer_asset");
+  const buyerScore = dossierNumber(opp.market_pressure_summary?.buyer_pressure_score);
+  const supplierScore = dossierNumber(opp.market_pressure_summary?.supplier_availability_score);
+  const pressure =
+    typeof buyerScore === "number" && buyerScore >= 55
+      ? `Buyer pressure ${dossierFmtScore(buyerScore)}`
+      : typeof supplierScore === "number" && supplierScore >= 55
+        ? `Supplier availability ${dossierFmtScore(supplierScore)}`
+        : "";
+  const corridor = [opp.origin_country, opp.destination_country].filter(Boolean).join(" → ");
+  return [
+    `${opp.commodity ?? "Oil/gas"} lane${corridor ? ` ${corridor}` : ""}`,
+    supplier || buyer ? `${supplier || "supplier side"} → ${buyer || "buyer side"}` : "",
+    pressure,
+  ]
+    .filter(Boolean)
+    .join(" — ");
+}
+
+function laneQuantityBand(opp?: IntelOpportunity, cargo?: IntelCargoMovement[]): string {
+  const summary = dossierRecord(opp?.cargo_summary);
+  const low = dossierNumber(summary?.quantity_low) ?? dossierNumber(summary?.low);
+  const high = dossierNumber(summary?.quantity_high) ?? dossierNumber(summary?.high);
+  const unit = dossierText(summary?.unit) || "t";
+  if (low != null && high != null) return `${dossierFmtCompact(low)}–${dossierFmtCompact(high)} ${unit}`;
+  const cargoQty = cargo?.find((item) => item.quantity?.best)?.quantity;
+  if (cargoQty?.best) {
+    const band =
+      cargoQty.low != null && cargoQty.high != null
+        ? `${dossierFmtCompact(cargoQty.low)}–${dossierFmtCompact(cargoQty.high)}`
+        : dossierFmtCompact(cargoQty.best);
+    return `${band} ${cargoQty.unit ?? "t"}`;
+  }
+  return "";
+}
+
+function laneBrokerAlphaGaps(raw: LaneDossierRaw): DossierGap[] {
+  const gaps: DossierGap[] = [];
+  if (!raw.broker_alpha && !raw.thesis_text) {
+    gaps.push(dossierGap("broker_alpha", "broker alpha pending", "Counterparty intent precompute is not attached yet."));
+  }
+  if (!raw.outreach_pack) {
+    gaps.push(dossierGap("outreach_pack", "outreach pack pending", "Outreach pack synthesis is not attached yet."));
+  }
+  for (const label of raw.gaps ?? []) {
+    if (!gaps.some((gap) => gap.label === label)) gaps.push(dossierGap(label.replace(/\s+/g, "_"), label));
+  }
+  return gaps;
+}
+
+function laneNumbersGaps(raw: LaneDossierRaw): DossierGap[] {
+  const gaps: DossierGap[] = [];
+  const landed = dossierRecord(raw.arbitrage?.landed_margin);
+  if (!landed || Object.keys(landed).length === 0) {
+    gaps.push(
+      dossierGap(
+        "landed_margin",
+        "landed margin pending",
+        "Freight curve, quality adjustment, and landed margin bands are not attached yet.",
+      ),
+    );
+  }
+  if ((raw.market_pressure ?? []).length === 0) {
+    gaps.push(dossierGap("market_pressure", "JODI stress pending", "Market pressure snapshots would unlock stress context."));
+  }
+  if ((raw.benchmarks ?? []).length === 0 && !(raw.arbitrage?.benchmarks ?? []).length) {
+    gaps.push(dossierGap("benchmarks", "benchmark context pending", "Pink Sheet / EIA benchmark cards would unlock price context."));
+  }
+  return gaps;
+}
+
+function laneActGaps(raw: LaneDossierRaw, contacts: DossierSectionItem[]): DossierGap[] {
+  const gaps: DossierGap[] = [];
+  if (contacts.length === 0) {
+    gaps.push(
+      dossierGap(
+        "contacts_pending",
+        "contacts pending",
+        "Shipvault contacts, cargo chain bundles, or operator outreach sources would unlock contact cards.",
+      ),
+    );
+  }
+  gaps.push(
+    dossierGap(
+      "verify_checklist",
+      "verify before outreach",
+      "Confirm ownership, cargo evidence tier, sanctions, and benchmark context before contacting counterparties.",
+    ),
+  );
+  if (!raw.outreach_pack) {
+    gaps.push(dossierGap("outreach_pack", "outreach pack pending"));
+  }
+  return gaps;
+}
+
+function laneChainGaps(raw: LaneDossierRaw, chainItems: DossierSectionItem[]): DossierGap[] {
+  if (chainItems.length > 0) return [];
+  return [
+    dossierGap(
+      "chain_pending",
+      "commercial chain pending",
+      "Investor path, cargo chain, or commercial_chain_bundle would unlock the lane chain.",
+    ),
+  ];
+}
+
+export function shapeLaneDossier(raw: LaneDossierRaw, opportunityId: string): LaneDossierView {
+  const opp = raw.opportunity;
+  const paths = raw.investor_paths ?? (raw.investor_path ? [raw.investor_path] : []);
+  const path = paths[0];
+  const cargo = raw.cargo_movements ?? [];
+  const bundle = dossierRecord(raw.commercial_chain_bundle);
+  const contactsRaw = mergeIntelArrays(
+    dossierRecordArray(raw.contacts),
+    dossierRecordArray(bundle?.contacts),
+    ...cargo.map((item) => dossierRecordArray(item.commercial_chain?.contacts)),
+  );
+
+  const thesis =
+    dossierText(raw.thesis_text) ||
+    (opp ? laneThesisFromOpportunity(opp, path) : "Lane dossier pending — opportunity record not found.");
+  const brokerAlpha = dossierRecord(raw.broker_alpha);
+  const thesisItems: DossierSectionItem[] = [
+    {
+      id: "lane-thesis",
+      evidenceLabel: normalizeEvidenceLabel(opp?.evidence_grade ?? path?.evidence_label),
+      title: "Broker thesis",
+      meta: dossierFmtScore(opp?.score ?? path?.score),
+      lines: [
+        thesis,
+        dossierText(brokerAlpha?.summary) || dossierText(brokerAlpha?.thesis),
+        laneQuantityBand(opp, cargo) ? `quantity band ${laneQuantityBand(opp, cargo)}` : "",
+      ].filter(Boolean),
+    },
+  ];
+  if (brokerAlpha) {
+    thesisItems.push({
+      id: "broker-alpha",
+      evidenceLabel: normalizeEvidenceLabel(dossierText(brokerAlpha.evidence_label) || "inferred"),
+      title: "Broker alpha",
+      meta: dossierFmtScore(dossierNumber(brokerAlpha.score)),
+      lines: [
+        dossierText(brokerAlpha.rationale),
+        dossierText(brokerAlpha.limitations),
+      ].filter(Boolean),
+    });
+  }
+
+  const bundleItem = dossierCommercialBundleItem(bundle);
+  const chainItems = [
+    ...(bundleItem ? [bundleItem] : []),
+    ...paths.map(dossierPathItem),
+    ...(opp ? [dossierOpportunityItem(opp)] : []),
+    ...cargo.map(dossierCargoChainItem).filter((item): item is DossierSectionItem => item !== null),
+  ];
+
+  const contactItems = contactsRaw.map(dossierContactItem);
+  const importerItems = (raw.importers ?? []).map(dossierImporterItem);
+  const marketItems = [
+    ...(raw.market_pressure ?? []).map(dossierMarketPressureItem),
+    ...(raw.benchmarks ?? []).map(dossierBenchmarkItem),
+    ...(raw.arbitrage?.benchmarks ?? []).map(dossierBenchmarkItem),
+  ];
+  const landed = dossierRecord(raw.arbitrage?.landed_margin);
+  if (landed && Object.keys(landed).length > 0) {
+    marketItems.push({
+      id: "landed-margin",
+      evidenceLabel: normalizeEvidenceLabel(dossierText(landed.evidence_label) || "estimated"),
+      title: "Landed margin band",
+      meta: dossierText(landed.band) || dossierText(landed.scenario),
+      lines: [
+        dossierText(landed.summary),
+        dossierText(landed.low) && dossierText(landed.high)
+          ? `${dossierText(landed.low)} – ${dossierText(landed.high)} ${dossierText(landed.unit)}`
+          : "",
+        "indicative scenario context only",
+      ].filter(Boolean),
+    });
+  }
+
+  const thesisGaps = laneBrokerAlphaGaps(raw);
+  const chainGaps = laneChainGaps(raw, chainItems);
+  const actGaps = laneActGaps(raw, contactItems);
+  const numbersGaps = laneNumbersGaps(raw);
+
+  return {
+    id: opportunityId,
+    thesis,
+    evidenceGrade: normalizeEvidenceLabel(opp?.evidence_grade ?? path?.evidence_label),
+    commodity: opp?.commodity ?? path?.commodity,
+    corridor: [opp?.origin_country ?? path?.origin_country, opp?.destination_country ?? path?.destination_country]
+      .filter(Boolean)
+      .join(" → "),
+    score: opp?.score ?? path?.score,
+    synthesisStatus: raw.synthesis_status ?? (opp ? "partial" : "pending"),
+    segments: {
+      thesis: { count: thesisItems.length, items: thesisItems, gaps: thesisGaps },
+      chain: { count: chainItems.length, items: chainItems, gaps: chainGaps },
+      act: {
+        count: contactItems.length + importerItems.length,
+        items: [...contactItems, ...importerItems],
+        gaps: actGaps,
+      },
+      numbers: { count: marketItems.length, items: marketItems, gaps: numbersGaps },
+    },
+    limitations: mergeIntelArrays(
+      raw.limitations ?? [],
+      opp?.limitations ?? [],
+      path?.limitations ?? [],
+      raw.arbitrage?.limitations ?? [],
+    ),
+  };
+}
+
+export async function fetchIntelSTSOpenVessels(limit = 12): Promise<IntelSTSOpenVessel[]> {
+  const res = await fetch(`${apiBase()}/api/intel/sts-open-vessels?limit=${limit}`, authFetchOpts);
+  if (!res.ok) return [];
+  const data = (await res.json()) as { items?: IntelSTSOpenVessel[] };
+  return data.items ?? [];
+}
+
+async function assembleLaneDossierFallback(opportunityId: string): Promise<LaneDossierRaw> {
+  const [opportunities, paths, cargo, importers, sts] = await Promise.all([
+    fetchIntelOpportunities({ limit: 100 }),
+    fetchIntelInvestorPaths({ opportunityId, limit: 6 }),
+    fetchIntelCargoMovements({ limit: 20 }),
+    fetchIntelImporters({ limit: 12 }),
+    fetchIntelSTSPredictions(12),
+  ]);
+  const opportunity = opportunities.find((item) => item.id === opportunityId);
+  if (!opportunity) {
+    return {
+      synthesis_status: "pending",
+      gaps: ["lane not found"],
+      limitations: ["Opportunity record not found in current snapshot."],
+    };
+  }
+  const arbitrage = await fetchIntelArbitrage({
+    origin: opportunity.origin_country,
+    destination: opportunity.destination_country,
+    commodity: opportunity.commodity,
+  });
+  const marketPressure = dossierRecordArray(opportunity.market_pressure_summary);
+  const path = paths[0];
+  return {
+    opportunity,
+    investor_path: path,
+    investor_paths: paths,
+    cargo_movements: cargo.slice(0, 6),
+    importers: importers.slice(0, 6),
+    sts_predictions: sts.slice(0, 4),
+    market_pressure: marketPressure,
+    benchmarks: dossierRecordArray(opportunity.price_context),
+    arbitrage,
+    thesis_text: laneThesisFromOpportunity(opportunity, path),
+    synthesis_status: "partial",
+    gaps: [
+      "broker alpha pending",
+      "outreach pack pending",
+      ...(arbitrage?.landed_margin ? [] : ["landed margin pending"]),
+    ],
+    limitations: [
+      ...(opportunity.limitations ?? []),
+      ...(path?.limitations ?? []),
+      "Synthesis API pending — assembled from opportunity, investor path, and arbitrage snapshots.",
+    ],
+  };
+}
+
+export async function fetchLaneDossier(opportunityId: string): Promise<LaneDossierView> {
+  const res = await fetch(
+    `${apiBase()}/api/intel/opportunities/${encodeURIComponent(opportunityId)}/dossier`,
+    authFetchOpts,
+  );
+  if (res.ok) {
+    const raw = (await res.json()) as LaneDossierRaw;
+    return shapeLaneDossier({ ...raw, synthesis_status: raw.synthesis_status ?? "complete" }, opportunityId);
+  }
+  const fallback = await assembleLaneDossierFallback(opportunityId);
+  return shapeLaneDossier(fallback, opportunityId);
+}
