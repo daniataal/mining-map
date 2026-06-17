@@ -3,6 +3,7 @@ package ais
 import (
 	"context"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -79,10 +80,26 @@ func runCycle(ctx context.Context, pool *pgxpool.Pool, cfg config.Config, log ze
 		bufferDeg = defaultTerminalBufferDeg
 	}
 	boxes := BuildTerminalBoxes(lats, lons, bufferDeg)
-	log.Info().
+	if raw := strings.TrimSpace(cfg.AISExtraBoundingBoxes); raw != "" {
+		extra, err := BoxesFromJSON([]byte(raw))
+		if err != nil {
+			log.Warn().Err(err).Msg("ais ingest ignoring MADSAN_AIS_EXTRA_BOUNDING_BOXES")
+		} else {
+			boxes = MergeBoundingBoxes(boxes, extra)
+		}
+	}
+	acceptAll := cfg.AISAcceptAllVessels()
+	ev := log.Info().
 		Int("assets", index.Count()).
 		Int("subscription_boxes", len(boxes)).
-		Msg("ais ingest subscribing to AISStream")
+		Str("relevance_mode", cfg.AISRelevanceMode)
+	if len(boxes) > 0 {
+		b := boxes[0]
+		ev = ev.
+			Float64("bbox_min_lat", b[0][0]).Float64("bbox_min_lon", b[0][1]).
+			Float64("bbox_max_lat", b[1][0]).Float64("bbox_max_lon", b[1][1])
+	}
+	ev.Msg("ais ingest subscribing to AISStream")
 
 	tracker := portcall.NewTracker(pool, index)
 	sub := Subscription{APIKey: cfg.AISStreamAPIKey, BoundingBoxes: boxes}
@@ -101,22 +118,36 @@ func runCycle(ctx context.Context, pool *pgxpool.Pool, cfg config.Config, log ze
 
 	_ = UpdateSourceHealth(cycleCtx, pool, 0, nil)
 
-	var frameCount int
+	var frameCount, relevantCount int
 	lastHealth := time.Now()
 
 	return RunStreamWithTLSFallback(cycleCtx, sub, func(ctx context.Context, u *Update) error {
 		frameCount++
 		if time.Since(lastHealth) > 15*time.Second {
 			_ = UpdateSourceHealth(ctx, pool, frameCount, nil)
+			if relevantCount > 0 || frameCount > 100 {
+				pct := 0.0
+				if frameCount > 0 {
+					pct = 100 * float64(relevantCount) / float64(frameCount)
+				}
+				log.Info().
+					Int("raw_frames", frameCount).
+					Int("relevant_frames", relevantCount).
+					Float64("relevant_pct", pct).
+					Bool("accept_all", acceptAll).
+					Msg("ais ingest frame stats")
+			}
 			frameCount = 0
+			relevantCount = 0
 			lastHealth = time.Now()
 		}
 
 		asset := index.Match(u.Lat, u.Lon)
 		nearSulfur := asset != nil && asset.HasSulfur
-		if !IsRelevantVessel(u.ShipTypeCode, u.ShipTypeLabel, u.Name, nearSulfur) {
+		if !acceptAll && !IsRelevantVessel(u.ShipTypeCode, u.ShipTypeLabel, u.Name, nearSulfur) {
 			return nil
 		}
+		relevantCount++
 		tclass := TankerClass(u.ShipTypeCode, u.ShipTypeLabel, u.Name)
 		// vessels row: every relevant frame (not throttled). ais_positions history
 		// is throttled separately via minInterval (MADSAN_AIS_POSITION_MIN_SEC).

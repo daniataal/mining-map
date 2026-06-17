@@ -58,10 +58,12 @@ func (s *Service) ServeMVT(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		// Positions are live-only: vessels without AIS in the freshness window are
-		// excluded (registry-only entries stay in the DB for dossiers/search, not the map).
-		// ais_age_h lets the client dim older positions. DB enrichment (ShipVault
-		// dwt/loa) is joined onto the live position for icon scaling.
+		// Intelligence map: show all vessels with known coordinates regardless of
+		// AIS freshness. ais_age_h drives client-side opacity (fresh=solid, stale=dim)
+		// so users see the staleness signal rather than vessels disappearing.
+		// Registry-only vessels (null last_seen_at) get ais_age_h = NULL which the
+		// frontend treats as maximum age (minimum opacity). The WS live overlay keeps
+		// its own 12h freshness window for real-time motion updates.
 		query = `
 			SELECT ST_AsMVT(mvt.*, $4) FROM (
 				SELECT ` + mvtGeom + ` AS geom,
@@ -93,7 +95,6 @@ func (s *Service) ServeMVT(w http.ResponseWriter, r *http.Request) {
 				LEFT JOIN vessel_enrichment ve ON ve.mmsi = v.mmsi
 				WHERE v.latitude IS NOT NULL AND v.longitude IS NOT NULL
 				  AND v.geom IS NOT NULL
-				  AND v.last_seen_at > now() - interval '72 hours'
 				  AND ` + tileFilter + `
 			) mvt`
 	case "metals-assets":

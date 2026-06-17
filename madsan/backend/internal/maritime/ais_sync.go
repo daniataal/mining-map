@@ -205,8 +205,11 @@ func SnapshotLive(ctx context.Context, pool *pgxpool.Pool, bbox [4]float64, limi
 }
 
 func snapshot(ctx context.Context, pool *pgxpool.Pool, bbox [4]float64, limit int, maxAge time.Duration) ([]VesselDelta, error) {
-	if limit <= 0 || limit > 500 {
-		limit = 200
+	if limit <= 0 {
+		limit = 500
+	}
+	if limit > 5000 {
+		limit = 5000
 	}
 	if maxAge <= 0 {
 		maxAge = LivePositionMaxAge

@@ -176,6 +176,10 @@ type Config struct {
 	AISPositionMinIntervalSec int
 	AISGeofenceRadiusM        float64
 	AISTerminalBufferDeg      float64
+	// AISRelevanceMode: tanker (default) keeps oil-relevant vessels only; all ingests every parsed frame (high DB load).
+	AISRelevanceMode string
+	// AISExtraBoundingBoxes: optional JSON array of [[[lat,lon],[lat,lon]],...] merged with the terminal envelope.
+	AISExtraBoundingBoxes string
 	EIAAPIKey                 string
 	OpenSanctionsAPIKey       string
 	DocumentsDir              string
@@ -240,6 +244,8 @@ func Load() Config {
 		AISPositionMinIntervalSec: envInt("MADSAN_AIS_POSITION_MIN_SEC", 90),
 		AISGeofenceRadiusM:        envFloat("MADSAN_AIS_GEOFENCE_RADIUS_M", 1200),
 		AISTerminalBufferDeg:      envFloat("MADSAN_AIS_TERMINAL_BUFFER_DEG", 0.45),
+		AISRelevanceMode:          env("MADSAN_AIS_RELEVANCE_MODE", "tanker"),
+		AISExtraBoundingBoxes:     env("MADSAN_AIS_EXTRA_BOUNDING_BOXES", ""),
 		EIAAPIKey:                 env("EIA_API_KEY", ""),
 		OpenSanctionsAPIKey:       env("OPENSANCTIONS_API_KEY", ""),
 		DocumentsDir:              env("MADSAN_DOCUMENTS_DIR", ""),
@@ -275,6 +281,11 @@ func defaultAISSyncEnabled() bool {
 // defaultAISDirectEnabled returns whether direct AISStream ingest mode is active by default.
 func defaultAISDirectEnabled() bool {
 	return env("AISSTREAM_API_KEY", "") != ""
+}
+
+// AISAcceptAllVessels reports whether ingest should skip the oil/tanker relevance filter.
+func (c Config) AISAcceptAllVessels() bool {
+	return strings.EqualFold(strings.TrimSpace(c.AISRelevanceMode), "all")
 }
 
 // UseLegacyAISSync reports whether the API process should run legacy oil_ais_positions sync.

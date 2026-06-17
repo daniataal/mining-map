@@ -45,8 +45,8 @@ type client struct {
 // snapshots resume (safety net when NOTIFY/listener is down).
 const snapshotFallbackAfter = 45 * time.Second
 
-// liveSnapshotLimit caps vessels per viewport WS snapshot (matches map density).
-const liveSnapshotLimit = 500
+// liveSnapshotLimit caps vessels per viewport WS snapshot (additive live overlay; tiles cover the rest).
+const liveSnapshotLimit = 2000
 
 type Hub struct {
 	log        zerolog.Logger

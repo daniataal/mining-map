@@ -105,7 +105,7 @@ export const LAYER_REGISTRY: LayerDef[] = [
     layerGroup: "storage-tanks",
     hideInDrawer: true,
     color: MAP_COLORS.tankFarm,
-    defaultOn: false,
+    defaultOn: true,
   },
   {
     id: "energy-terminals",

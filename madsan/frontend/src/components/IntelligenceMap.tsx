@@ -486,7 +486,9 @@ function addLiveVesselLayers(map: maplibregl.Map, visible: boolean) {
  * WS down: MVT fallback for last-known positions (<72h); live source cleared.
  */
 function setVesselLayerVisibility(map: maplibregl.Map, visible: boolean, liveConnected: boolean) {
-  const tileVis = visible && !liveConnected ? "visible" : "none";
+  // Tiles always show the full 72h DB window — never suppressed by WS connection.
+  // The WS live layer is additive on top for smooth motion on freshly-seen vessels.
+  const tileVis = visible ? "visible" : "none";
   const liveVis = visible && liveConnected ? "visible" : "none";
   const setIfPresent = (lid: string, visibility: "visible" | "none") => {
     try {
@@ -1720,20 +1722,12 @@ export default function IntelligenceMap({
 
       if (vertical === "energy") {
         addLiveVesselLayers(map, !!layers.vessels);
-        // Default to live-only until WS connects or MVT fallback fires.
+        // Load tiles immediately — they show all vessels from the 72h DB window.
+        // No fallback timer needed: tiles are the primary source, WS is additive.
+        vesselMvtApi.ensure(!!layers.vessels);
         setVesselLayerVisibility(map, !!layers.vessels, false);
 
         let wsLiveActive = false;
-        const scheduleVesselMvtFallback = () => {
-          if (vesselMvtTimer) clearTimeout(vesselMvtTimer);
-          if (!layersRef.current.vessels) return;
-          vesselMvtTimer = setTimeout(() => {
-            if (isStale() || wsLiveActive || !layersRef.current.vessels) return;
-            vesselMvtApi.ensure(true);
-            setVesselLayerVisibility(map, true, false);
-          }, VESSEL_MVT_FALLBACK_MS);
-        };
-        scheduleVesselMvtFallback();
 
         // Marching dash on the focused vessel track only.
         const dashPhases: number[][] = [
@@ -1814,7 +1808,9 @@ export default function IntelligenceMap({
               clearTimeout(vesselMvtTimer);
               vesselMvtTimer = null;
             }
-            vesselMvtApi.suppress();
+            // Tiles stay loaded — ensure they exist (fast no-op if already ready).
+            // WS live layer is additive, not a replacement.
+            vesselMvtApi.ensure(!!layers.vessels);
             setVesselTileExclusion(map, []);
             setWsState("connected");
             setVesselLayerVisibility(map, !!layers.vessels, true);
@@ -1840,13 +1836,10 @@ export default function IntelligenceMap({
             wsLiveActive = false;
             setWsState("disconnected");
             setVesselTileExclusion(map, []);
+            // Tiles are always loaded — just hide the live overlay.
+            // No need to re-ensure or reschedule: tiles never went away.
             setVesselLayerVisibility(map, !!layers.vessels, false);
             vesselMotion?.clear();
-            if (layersRef.current.vessels) {
-              vesselMvtApi.ensure(true);
-              setVesselLayerVisibility(map, true, false);
-            }
-            scheduleVesselMvtFallback();
             if (!isStale()) {
               wsRetryTimer = setTimeout(connectWs, wsRetryMs);
               wsRetryMs = Math.min(wsRetryMs * 2, 30000);
@@ -2030,13 +2023,9 @@ export default function IntelligenceMap({
     if (vertical === "energy") {
       const vesselsOn = !!layers.vessels;
       if (vesselsOn) {
-        if (wsState === "connected") {
-          vesselMvtApiRef.current?.suppress();
-          setVesselLayerVisibility(map, true, true);
-        } else {
-          vesselMvtApiRef.current?.ensure(true);
-          setVesselLayerVisibility(map, true, false);
-        }
+        // Tiles always loaded; WS state only controls live overlay visibility.
+        vesselMvtApiRef.current?.ensure(true);
+        setVesselLayerVisibility(map, true, wsState === "connected");
       } else {
         setVesselLayerVisibility(map, false, false);
       }
